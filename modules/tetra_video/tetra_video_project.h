@@ -127,7 +127,7 @@ private:
 	static Vector<int> _sorted_track_clips(const State &p_state, int p_track);
 	bool _clip_editable(const State &p_state, int p_clip_index) const;
 	bool _resolve_tracks(const PackedInt32Array &p_tracks, Vector<int> &r_tracks) const;
-	bool _edit_effect(int p_clip_id, int p_index, const String &p_step_name, State &r_next, int &r_clip_index) const;
+	bool _edit_effect(int p_clip_id, int p_index, State &r_next, int &r_clip_index) const;
 
 	void _commit(const String &p_name, const State &p_next);
 	void _apply_state(const State &p_next);

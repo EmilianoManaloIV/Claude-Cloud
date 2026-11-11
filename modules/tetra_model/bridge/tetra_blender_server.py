@@ -705,8 +705,26 @@ _OPERATOR_DENY_EXACT = {
     "object.isolate_type_render",
     "object.subdivision_set",
     "object.hide_render_clear_all",
+    "object.transform_to_mouse",
+    "object.assign_property_defaults",
+    "object.make_dupli_face",
     "mesh.separate",
     "mesh.knife_project",
+    "mesh.loopcut",
+    "mesh.loopcut_slide",
+    "mesh.fit_edge_loops_to_annotation",
+    "uv.rip",
+    "uv.rip_move",
+    "uv.select",
+    "uv.select_loop",
+    "uv.select_edge_ring",
+    # Crashes Blender 5.3 when executed without an image editor.
+    "uv.stitch",
+    "transform.bbone_resize",
+    "transform.tilt",
+    "transform.skin_resize",
+    "transform.edge_slide",
+    "transform.vert_slide",
     "mesh.select_mode",
     "mesh.reveal",
     "mesh.hide",
@@ -733,6 +751,7 @@ _OPERATOR_DENY_PARTS = (
     "_menu",
     "clipboard",
     "preview",
+    "freestyle",
 )
 
 _OBJECT_DENY_PARTS = (
@@ -1515,7 +1534,7 @@ def cmd_render(request):
         pass
     scene.view_settings.exposure = float(settings.get("exposure", 0.0))
 
-    _build_mesh_objects([dict(entry, file=entry.get("file")) for entry in scene_description.get("meshes") or []])
+    _build_mesh_objects(scene_description.get("meshes"))
     _add_camera(scene, scene_description.get("camera") or {}, width / height)
     for index, light in enumerate(scene_description.get("lights") or []):
         _add_light(light, index)
