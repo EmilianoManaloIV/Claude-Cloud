@@ -23,8 +23,11 @@ elif command -v ld.lld >/dev/null 2>&1; then
 	LINKER_ARG=(linker=lld)
 fi
 
+# Two SCons processes must never run in the same tree: queue behind a lock.
+LOCK="${TMPDIR:-/tmp}/tetra-scons.lock"
+
 cd "$GODOT"
-exec scons \
+exec flock "$LOCK" scons \
 	platform=linuxbsd \
 	target=editor \
 	debug_symbols=no \

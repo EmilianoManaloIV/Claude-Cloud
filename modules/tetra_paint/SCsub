@@ -1,8 +1,20 @@
 #!/usr/bin/env python
 from misc.utility.scons_hints import *
 
+import os
+
 Import("env")
 Import("env_modules")
 
 env_tetra_paint = env_modules.Clone()
-env_tetra_paint.add_source_files(env.modules_sources, "*.cpp")
+
+# Every .cpp below this directory belongs to the module, except the cores'
+# standalone unit tests (built by the top-level CMakeLists.txt instead).
+module_dir = Dir(".").srcnode().abspath
+for dirpath, dirnames, filenames in os.walk(module_dir):
+    dirnames[:] = sorted(d for d in dirnames if d != "tests" and not d.startswith("."))
+    sources = sorted(f for f in filenames if f.endswith(".cpp"))
+    if sources:
+        rel = os.path.relpath(dirpath, module_dir)
+        prefix = "" if rel == "." else rel + "/"
+        env_tetra_paint.add_source_files(env.modules_sources, [prefix + f for f in sources])
