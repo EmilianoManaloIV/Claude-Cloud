@@ -55,6 +55,7 @@ class TetraParamPanel : public VBoxContainer {
 	ScrollContainer *scroll = nullptr;
 	VBoxContainer *content = nullptr;
 	FoldableContainer *advanced_section = nullptr;
+	VBoxContainer *advanced_rows = nullptr;
 	EditorFileDialog *file_dialog = nullptr;
 	int file_dialog_row = -1;
 
@@ -113,6 +114,9 @@ public:
 
 	void set_advanced_folded(bool p_folded);
 	bool is_advanced_folded() const;
+
+	// The size the form needs to be shown without scrolling.
+	Size2 get_form_minimum_size() const;
 
 	TetraParamPanel();
 };

@@ -20,11 +20,18 @@ export TETRA_REPO_ROOT="$ROOT"
 shopt -s nullglob
 failed=0
 count=0
+log="$(mktemp)"
+trap 'rm -f "$log"' EXIT
 for test in "$PROJECT"/${1:-*}/test_*.gd; do
 	rel="${test#"$PROJECT"/}"
 	count=$((count + 1))
-	if timeout "${TETRA_TEST_TIMEOUT:-600}" "$BIN" --headless --path "$PROJECT" --script "res://$rel" 2>&1 \
-		| grep -v -e '^Godot Engine' -e '^Tetra Studio v' -e '^$'; [ "${PIPESTATUS[0]}" -ne 0 ]; then
+	timeout "${TETRA_TEST_TIMEOUT:-600}" "$BIN" --headless --path "$PROJECT" --script "res://$rel" >"$log" 2>&1
+	status=$?
+	grep -v -e '^Godot Engine' -e '^Tetra Studio v' -e '^$' "$log"
+	# A script error aborts run() without failing a check, so the exit status
+	# alone is not enough: also require a clean log and at least one check.
+	if [ "$status" -ne 0 ] || grep -q -e 'SCRIPT ERROR' -e 'Parse Error' "$log" \
+		|| ! grep -q -E ': [1-9][0-9]* checks, 0 failed' "$log"; then
 		echo "FAIL  $rel"
 		failed=$((failed + 1))
 	else

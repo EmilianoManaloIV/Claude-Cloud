@@ -50,6 +50,7 @@ class Client:
         request = {"id": self.next_id, "cmd": cmd}
         request.update(fields)
         self.next_id += 1
+        assert request["cmd"] == cmd and isinstance(request["id"], int), "a field collides with the protocol's own keys"
         response = self.raw(json.dumps(request))
         assert response["id"] == request["id"], response
         return response
@@ -249,11 +250,18 @@ def main():
     check(response["ok"] and result["header"]["polygon_count"] == 30, "inset then object-mode operator then transform: %s" % response.get("error"))
     check(response["ok"] and abs(bounds(result)[5] - 3.0) < 1e-5, "translate moved the mesh")
 
+    triangles = os.path.join(work, "triangles.tmsh")
+    write_mesh(triangles, [(-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)], [(0, 1, 2), (0, 2, 3)], normals=[(0, 0, 1)] * 6)
+    response = client.call("run_operators", mesh=triangles, output=out, join_triangles=True, operators=[{"id": "blender:mesh.subdivide", "values": {"number_cuts": 2}}])
+    check(response["ok"] and response["polygon_count"] == 9, "joined triangles subdivide like the quad they came from: %s" % (response.get("error") or response.get("polygon_count")))
+    response = client.call("apply_modifiers", mesh=triangles, output=out, join_triangles=True, modifiers=[])
+    check(response["ok"] and response["polygon_count"] == 1, "join_triangles also applies to modifier stacks")
+
     monkey = os.path.join(work, "monkey.tmsh")
-    response = client.call("create_primitive", id="blender:mesh.primitive_monkey_add", values={}, output=monkey)
+    response = client.call("create_primitive", primitive="blender:mesh.primitive_monkey_add", values={}, output=monkey)
     result = read_mesh(monkey)
     check(response["ok"] and result["header"]["vertex_count"] == 507, "Suzanne has 507 vertices")
-    response = client.call("create_primitive", id="blender:mesh.primitive_cube_add", values={"size": 4, "location": [10, 0, 0]}, output=out)
+    response = client.call("create_primitive", primitive="blender:mesh.primitive_cube_add", values={"size": 4, "location": [10, 0, 0]}, output=out)
     check(response["ok"] and bounds(read_mesh(out))[:4] == (8, -2, -2, 12), "primitive parameters and location applied")
 
     exported = os.path.join(work, "scene.glb")

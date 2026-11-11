@@ -3,10 +3,29 @@ from misc.utility.scons_hints import *
 
 import os
 
+import methods
+
 Import("env")
 Import("env_modules")
 
 env_tetra_model = env_modules.Clone()
+
+
+def make_server_script_header(target, source, env):
+    """Embed the Blender-side server script as a C string."""
+    with open(str(source[0]), "r", encoding="utf-8") as script_file:
+        script = script_file.read()
+    with methods.generated_wrapper(str(target[0])) as header:
+        header.write(
+            "inline constexpr const char *TETRA_BLENDER_SERVER_SCRIPT = " + methods.to_raw_cstring(script) + ";\n"
+        )
+
+
+env_tetra_model.CommandNoCache(
+    "bridge/tetra_blender_server.gen.h",
+    "bridge/tetra_blender_server.py",
+    env.Run(make_server_script_header),
+)
 
 # Every .cpp below this directory belongs to the module, except the cores'
 # standalone unit tests (built by the top-level CMakeLists.txt instead).

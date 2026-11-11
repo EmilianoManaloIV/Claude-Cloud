@@ -12,6 +12,7 @@
 #include "scene/gui/button.h"
 #include "scene/gui/check_box.h"
 #include "scene/gui/color_picker.h"
+#include "scene/gui/flow_container.h"
 #include "scene/gui/foldable_container.h"
 #include "scene/gui/label.h"
 #include "scene/gui/line_edit.h"
@@ -24,6 +25,8 @@ namespace {
 // Unscaled widths below which a row's label and its control do not shrink.
 const int LABEL_MIN_WIDTH = 64;
 const int EDITOR_MIN_WIDTH = 120;
+// Two components of a vector fit side by side in the narrowest control.
+const int COMPONENT_MIN_WIDTH = 58;
 const int TEXT_MIN_HEIGHT = 84;
 
 // The step of a float parameter that does not give one; the same as the inspector's default.
@@ -58,6 +61,7 @@ void TetraParamPanel::_rebuild() {
 	rows.clear();
 	row_by_name.clear();
 	advanced_section = nullptr;
+	advanced_rows = nullptr;
 	while (content->get_child_count() > 0) {
 		Node *child = content->get_child(0);
 		content->remove_child(child);
@@ -104,7 +108,7 @@ void TetraParamPanel::_rebuild() {
 		advanced_section->connect("folding_changed", callable_mp(this, &TetraParamPanel::_advanced_folding_changed));
 		content->add_child(advanced_section);
 
-		VBoxContainer *advanced_rows = memnew(VBoxContainer);
+		advanced_rows = memnew(VBoxContainer);
 		advanced_section->add_child(advanced_rows);
 		_add_rows(advanced_rows, true);
 	}
@@ -157,7 +161,8 @@ Control *TetraParamPanel::_create_row(int p_row) {
 
 	row.label = memnew(Label(text));
 	row.label->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
-	row.label->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS);
+	// The forced variant shows the ellipsis however little of the text is left.
+	row.label->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS_FORCE);
 	row.label->set_custom_minimum_size(Size2(LABEL_MIN_WIDTH * EDSCALE, 0));
 	row.label->set_h_size_flags(SIZE_EXPAND_FILL);
 	row.label->set_stretch_ratio(0.75);
@@ -206,10 +211,12 @@ Control *TetraParamPanel::_create_editor(int p_row) {
 	}
 
 	if (row.type == "vec2" || row.type == "vec3") {
-		HBoxContainer *box = memnew(HBoxContainer);
+		// The components share one line where there is room and wrap onto further lines in a narrow panel.
+		HFlowContainer *box = memnew(HFlowContainer);
 		const int components = row.type == "vec2" ? 2 : 3;
 		for (int i = 0; i < components; i++) {
 			row.spins[i] = _create_spin(p_row, i);
+			row.spins[i]->set_custom_minimum_size(Size2(COMPONENT_MIN_WIDTH * EDSCALE, 0));
 			box->add_child(row.spins[i]);
 		}
 		return box;
@@ -665,6 +672,18 @@ bool TetraParamPanel::is_advanced_folded() const {
 	return advanced_folded;
 }
 
+Size2 TetraParamPanel::get_form_minimum_size() const {
+	Size2 form = content->get_combined_minimum_size();
+	// A FoldableContainer leaves its content out of its minimum size while it is
+	// not visible in the tree, as in a dialog that is being sized before it is shown.
+	if (advanced_section && !advanced_section->is_folded() && !advanced_section->is_visible_in_tree()) {
+		const Size2 hidden = advanced_rows->get_combined_minimum_size() + advanced_section->get_theme_stylebox(SceneStringName(panel))->get_minimum_size();
+		form.x = MAX(form.x, hidden.x);
+		form.y += hidden.y;
+	}
+	return form;
+}
+
 void TetraParamPanel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_operation", "operation"), &TetraParamPanel::set_operation);
 	ClassDB::bind_method(D_METHOD("get_operation"), &TetraParamPanel::get_operation);
@@ -680,6 +699,7 @@ void TetraParamPanel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_scrollable"), &TetraParamPanel::is_scrollable);
 	ClassDB::bind_method(D_METHOD("set_advanced_folded", "folded"), &TetraParamPanel::set_advanced_folded);
 	ClassDB::bind_method(D_METHOD("is_advanced_folded"), &TetraParamPanel::is_advanced_folded);
+	ClassDB::bind_method(D_METHOD("get_form_minimum_size"), &TetraParamPanel::get_form_minimum_size);
 
 	ADD_SIGNAL(MethodInfo("value_changed", PropertyInfo(Variant::STRING, "name"), PropertyInfo(Variant::NIL, "value", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NIL_IS_VARIANT)));
 }

@@ -407,6 +407,21 @@ def _set_mode(obj, mode):
             bpy.ops.object.mode_set(mode=mode)
 
 
+def _join_triangles(obj):
+    """Merge pairs of triangles back into quads.
+
+    Meshes coming from Godot are always triangulated, which most of Blender's
+    modelling tools handle worse than the quads the triangles were made from.
+    Pairs are only merged where that loses nothing: same material, no sharp
+    edge and no UV seam between them.
+    """
+    _set_mode(obj, "EDIT")
+    with bpy.context.temp_override(**_context_override(obj)):
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.mesh.tris_convert_to_quads(uvs=True, sharp=True, materials=True)
+    _set_mode(obj, "OBJECT")
+
+
 def _write_evaluated(obj, output):
     """Write obj with its modifier stack evaluated."""
     depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -491,6 +506,15 @@ def _join_numbers(values):
     return ",".join(flat)
 
 
+def _within_limits(value, param):
+    """Clamp a default to the hard limits; a few RNA defaults lie outside their own range."""
+    if "min" in param and value < param["min"]:
+        value = param["min"]
+    if "max" in param and value > param["max"]:
+        value = param["max"]
+    return value
+
+
 def _param_schema(prop, current=None):
     """One schema parameter for an RNA property, or None if it has no plain value.
 
@@ -546,10 +570,10 @@ def _param_schema(prop, current=None):
         param["default"] = bool(default_value())
     elif kind == "INT" and not array_length:
         param["type"] = "seed" if prop.identifier == "seed" or prop.identifier.endswith("_seed") else "int"
-        param["default"] = int(default_value())
+        param["default"] = _within_limits(int(default_value()), param)
     elif kind == "FLOAT" and not array_length:
         param["type"] = "float"
-        param["default"] = _finite(default_value()) * scale
+        param["default"] = _within_limits(_finite(default_value()) * scale, param)
     elif kind == "FLOAT" and array_length in (2, 3, 4) and len(getattr(prop, "array_dimensions", [0, 0, 0])) and prop.array_dimensions[1] == 0:
         values = [_finite(v) * scale for v in default_value()]
         if prop.subtype in ("COLOR", "COLOR_GAMMA") and array_length in (3, 4):
@@ -1052,6 +1076,8 @@ def cmd_apply_modifiers(request):
     _reset_scene()
     obj = _mesh_object_from_file(source)
     _activate(obj)
+    if request.get("join_triangles"):
+        _join_triangles(obj)
     skipped = []
     for index, entry in enumerate(request.get("modifiers") or []):
         mod_type = str(entry.get("type", ""))
@@ -1119,6 +1145,8 @@ def cmd_run_operators(request):
     _reset_scene()
     obj = _mesh_object_from_file(source)
     _activate(obj)
+    if request.get("join_triangles"):
+        _join_triangles(obj)
     select = str(request.get("select", "ALL")).upper()
     select_mode = request.get("select_mode")
     _set_mode(obj, "EDIT")
@@ -1154,7 +1182,7 @@ def cmd_run_operators(request):
 
 
 def cmd_create_primitive(request):
-    idname, module_name, operator = _operator_from_id(str(_require(request, "id")))
+    idname, module_name, operator = _operator_from_id(str(_require(request, "primitive")))
     output = _require(request, "output")
     if module_name != "mesh" or not idname.startswith("mesh.primitive_"):
         raise BridgeError("'%s' is not a mesh primitive" % idname)

@@ -245,7 +245,8 @@ private:
 	void _stroke_dab(const Vector2 &p_position, float p_pressure, Rect2i &r_dirty);
 	void _stroke_update_profile(float p_radius, float p_hardness);
 
-	// Whole-image transforms.
+	// Layer and whole-image transforms.
+	void _set_layer_buffer(int p_index, const Vector<float> &p_pixels, const String &p_name);
 	void _replace_canvas(int p_width, int p_height, const LocalVector<Vector<float>> &p_layer_pixels, const Vector<float> &p_selection, const String &p_name);
 
 	// Operations.

@@ -10,7 +10,6 @@
 // srgb8_thresholds[c] is the smallest linear value that rounds to code c.
 static float srgb8_thresholds[257];
 static uint8_t srgb8_lookup[4097];
-static bool srgb8_ready = false;
 
 void tetra_paint_utils_initialize() {
 	for (int c = 0; c <= 256; c++) {
@@ -20,7 +19,6 @@ void tetra_paint_utils_initialize() {
 		const float encoded = TetraLayerModes::linear_to_srgb(float(i) / 4096.0f);
 		srgb8_lookup[i] = uint8_t(encoded * 255.0f + 0.5f);
 	}
-	srgb8_ready = true;
 }
 
 uint8_t tetra_linear_to_srgb8(float p_value) {

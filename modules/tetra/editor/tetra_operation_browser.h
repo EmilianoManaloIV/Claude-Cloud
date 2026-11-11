@@ -28,7 +28,8 @@ class TetraOperationBrowser : public VBoxContainer {
 	Tree *tree = nullptr;
 	RichTextLabel *description = nullptr;
 
-	void _update_tree();
+	// Rebuilds the list. With p_select_best_match a search selects its first result.
+	void _update_tree(bool p_select_best_match = false);
 	void _add_category(TreeItem *p_parent, const Dictionary &p_category, bool p_collapsed_by_default, TreeItem *&r_selected);
 	TreeItem *_add_operation(TreeItem *p_parent, int p_index, bool p_with_category);
 	void _update_description();
@@ -49,7 +50,8 @@ public:
 	void set_operations(const Array &p_operations);
 	Array get_operations() const;
 
-	// The id of the selected operation, or an empty String.
+	// The id of the selected operation, or an empty String. Typing a search
+	// text selects its best match.
 	String get_selected_id() const;
 	Dictionary get_selected_operation() const;
 	// Selects and reveals an operation without emitting operation_selected. An

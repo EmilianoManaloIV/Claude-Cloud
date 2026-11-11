@@ -2,10 +2,10 @@
 
 #include "mlt/tetra_mlt_engine.h"
 #include "tetra_video_assets.h"
+#include "tetra_video_xml.h"
 
 #include "core/config/project_settings.h"
 #include "core/io/file_access.h"
-#include "core/io/xml_parser.h"
 #include "core/variant/variant_utility.h"
 
 // Writing and reading the project as MLT XML.
@@ -19,13 +19,6 @@
 namespace {
 
 const int FORMAT_VERSION = 1;
-
-struct XmlNode {
-	String name;
-	HashMap<String, String> attributes;
-	String text;
-	Vector<int> children;
-};
 
 String _globalize(const String &p_path) {
 	if (p_path.begins_with("res://") || p_path.begins_with("user://")) {
@@ -106,66 +99,12 @@ String _audio_fade_animation(int p_first, int p_length, bool p_fade_in) {
 	return animation;
 }
 
-Error _build_tree(const String &p_xml, Vector<XmlNode> &r_nodes, String &r_error) {
-	const CharString utf8 = p_xml.utf8();
-	Ref<XMLParser> parser;
-	parser.instantiate();
-	if (utf8.length() == 0 || parser->_open_buffer((const uint8_t *)utf8.get_data(), utf8.length()) != OK) {
-		r_error = "The document is empty.";
-		return ERR_PARSE_ERROR;
-	}
-	Vector<int> stack;
-	// Node 0 is a synthetic root that holds the top-level elements.
-	r_nodes.push_back(XmlNode());
-	stack.push_back(0);
-	while (parser->read() == OK) {
-		switch (parser->get_node_type()) {
-			case XMLParser::NODE_ELEMENT: {
-				XmlNode node;
-				node.name = parser->get_node_name();
-				for (int i = 0; i < parser->get_attribute_count(); i++) {
-					node.attributes[parser->get_attribute_name(i)] = parser->get_attribute_value(i);
-				}
-				const int index = r_nodes.size();
-				r_nodes.push_back(node);
-				r_nodes.write[stack[stack.size() - 1]].children.push_back(index);
-				if (!parser->is_empty()) {
-					stack.push_back(index);
-				}
-			} break;
-			case XMLParser::NODE_ELEMENT_END: {
-				if (stack.size() < 2 || r_nodes[stack[stack.size() - 1]].name != parser->get_node_name()) {
-					r_error = vformat("Malformed XML: unexpected closing tag </%s> at line %d.", parser->get_node_name(), parser->get_current_line() + 1);
-					return ERR_PARSE_ERROR;
-				}
-				stack.resize(stack.size() - 1);
-			} break;
-			case XMLParser::NODE_TEXT:
-			case XMLParser::NODE_CDATA: {
-				r_nodes.write[stack[stack.size() - 1]].text += parser->get_node_data();
-			} break;
-			default:
-				break;
-		}
-	}
-	if (stack.size() > 1) {
-		r_error = vformat("Malformed XML: <%s> is never closed.", r_nodes[stack[stack.size() - 1]].name);
-		return ERR_PARSE_ERROR;
-	}
-	return OK;
-}
-
-String _attribute(const XmlNode &p_node, const String &p_name, const String &p_default = String()) {
-	const String *value = p_node.attributes.getptr(p_name);
-	return value ? *value : p_default;
-}
-
 // The <property> children of a node, by name.
-HashMap<String, String> _properties(const Vector<XmlNode> &p_nodes, const XmlNode &p_node) {
+HashMap<String, String> _properties(const Vector<TetraXmlNode> &p_nodes, const TetraXmlNode &p_node) {
 	HashMap<String, String> result;
 	for (int child : p_node.children) {
 		if (p_nodes[child].name == "property") {
-			result[_attribute(p_nodes[child], "name")] = p_nodes[child].text;
+			result[p_nodes[child].get_attribute("name")] = p_nodes[child].text;
 		}
 	}
 	return result;
@@ -238,7 +177,7 @@ String TetraVideoProject::to_mlt_xml(const Dictionary &p_options) const {
 	xml.line(0, "<?xml version=\"1.0\" encoding=\"utf-8\"?>");
 	xml.line(0, "<mlt LC_NUMERIC=\"C\" version=\"7.0.0\" producer=\"main_tractor\">");
 	xml.line(1, vformat("<profile description=\"%dx%d %s fps\" width=\"%d\" height=\"%d\" progressive=\"1\" sample_aspect_num=\"1\" sample_aspect_den=\"1\" display_aspect_num=\"%d\" display_aspect_den=\"%d\" frame_rate_num=\"%d\" frame_rate_den=\"%d\" colorspace=\"709\"/>",
-						width, height, String::num(get_fps(), 3), width, height, width / aspect, height / aspect, state.fps_num, state.fps_den));
+						width, height, state.fps_den == 1 ? itos(state.fps_num) : String::num(get_fps(), 2), width, height, width / aspect, height / aspect, state.fps_num, state.fps_den));
 
 	xml.line(1, vformat("<producer id=\"black\" in=\"0\" out=\"%d\">", duration - 1));
 	xml.property(2, "length", duration);
@@ -281,12 +220,13 @@ String TetraVideoProject::to_mlt_xml(const Dictionary &p_options) const {
 					Dictionary title;
 					title["text"] = bin.source;
 					title["family"] = "Sans";
-					title["size"] = MAX(8, height / 10);
+					// The text image is scaled to fit the frame, so the size sets its sharpness and the pad its margin.
+					title["size"] = MAX(32, height / 4);
 					title["weight"] = 700;
 					title["fgcolour"] = "0xffffffff";
 					title["bgcolour"] = "0x00000000";
 					title["align"] = 1;
-					title["pad"] = MAX(8, height / 20);
+					title["pad"] = MAX(16, height / 8);
 					title.merge(extra, true);
 					extra = title;
 				} break;
@@ -445,8 +385,8 @@ Error TetraVideoProject::load_from_xml(const String &p_xml) {
 }
 
 Error TetraVideoProject::_load_xml(const String &p_xml, State &r_state, String &r_error) const {
-	Vector<XmlNode> nodes;
-	const Error parse_error = _build_tree(p_xml, nodes, r_error);
+	Vector<TetraXmlNode> nodes;
+	const Error parse_error = tetra_parse_xml(p_xml, nodes, r_error);
 	if (parse_error != OK) {
 		return parse_error;
 	}
@@ -468,13 +408,13 @@ Error TetraVideoProject::_load_xml(const String &p_xml, State &r_state, String &
 	int main_tractor = -1;
 	State loaded;
 	for (int child : nodes[root].children) {
-		const XmlNode &node = nodes[child];
-		const String id = _attribute(node, "id");
+		const TetraXmlNode &node = nodes[child];
+		const String id = node.get_attribute("id");
 		if (node.name == "profile") {
-			loaded.width = _attribute(node, "width", "1920").to_int();
-			loaded.height = _attribute(node, "height", "1080").to_int();
-			loaded.fps_num = _attribute(node, "frame_rate_num", "25").to_int();
-			loaded.fps_den = _attribute(node, "frame_rate_den", "1").to_int();
+			loaded.width = node.get_attribute("width", "1920").to_int();
+			loaded.height = node.get_attribute("height", "1080").to_int();
+			loaded.fps_num = node.get_attribute("frame_rate_num", "25").to_int();
+			loaded.fps_den = node.get_attribute("frame_rate_den", "1").to_int();
 		} else if (node.name == "producer" || node.name == "chain") {
 			producers[id] = child;
 		} else if (node.name == "playlist") {
@@ -490,8 +430,8 @@ Error TetraVideoProject::_load_xml(const String &p_xml, State &r_state, String &
 		return ERR_INVALID_DATA;
 	}
 	const double fps = double(loaded.fps_num) / double(loaded.fps_den);
-	if (tractors.has(_attribute(nodes[root], "producer"))) {
-		main_tractor = tractors[_attribute(nodes[root], "producer")];
+	if (tractors.has(nodes[root].get_attribute("producer"))) {
+		main_tractor = tractors[nodes[root].get_attribute("producer")];
 	}
 
 	// The playlists that make up each timeline track, bottom to top, and whether MLT hides the track's video.
@@ -502,20 +442,20 @@ Error TetraVideoProject::_load_xml(const String &p_xml, State &r_state, String &
 			if (nodes[child].name != "track") {
 				continue;
 			}
-			const String producer = _attribute(nodes[child], "producer");
+			const String producer = nodes[child].get_attribute("producer");
 			Vector<int> sources;
-			bool audio = _attribute(nodes[child], "hide") == "video";
+			bool audio = nodes[child].get_attribute("hide") == "video";
 			if (playlists.has(producer)) {
 				sources.push_back(playlists[producer]);
 			} else if (tractors.has(producer)) {
 				// Kdenlive wraps the two playlists of a track in a tractor of their own.
-				const XmlNode &sub = nodes[tractors[producer]];
+				const TetraXmlNode &sub = nodes[tractors[producer]];
 				audio = audio || _lookup(_properties(nodes, sub), "kdenlive:audio_track") == "1";
 				for (int sub_child : sub.children) {
-					const String sub_producer = _attribute(nodes[sub_child], "producer");
+					const String sub_producer = nodes[sub_child].get_attribute("producer");
 					if (nodes[sub_child].name == "track" && playlists.has(sub_producer)) {
 						sources.push_back(playlists[sub_producer]);
-						audio = audio || _attribute(nodes[sub_child], "hide") == "video";
+						audio = audio || nodes[sub_child].get_attribute("hide") == "video";
 					}
 				}
 			}
@@ -600,28 +540,28 @@ Error TetraVideoProject::_load_xml(const String &p_xml, State &r_state, String &
 		for (int source : sources) {
 			int cursor = 0;
 			for (int child : nodes[source].children) {
-				const XmlNode &node = nodes[child];
+				const TetraXmlNode &node = nodes[child];
 				if (node.name == "blank") {
-					cursor += MAX(0, _parse_time(_attribute(node, "length"), fps, 0));
+					cursor += MAX(0, _parse_time(node.get_attribute("length"), fps, 0));
 					continue;
 				}
 				if (node.name != "entry") {
 					continue;
 				}
-				const String producer_id = _attribute(node, "producer");
+				const String producer_id = node.get_attribute("producer");
 				if (!producers.has(producer_id)) {
 					r_error = vformat("A playlist entry refers to the missing producer \"%s\".", producer_id);
 					return ERR_INVALID_DATA;
 				}
-				const XmlNode &producer = nodes[producers[producer_id]];
+				const TetraXmlNode &producer = nodes[producers[producer_id]];
 				const HashMap<String, String> producer_properties = _properties(nodes, producer);
 				const HashMap<String, String> entry_properties = _properties(nodes, node);
-				const int producer_length = _parse_time(_lookup(producer_properties, "length"), fps, _parse_time(_attribute(producer, "out"), fps, -1) + 1);
+				const int producer_length = _parse_time(_lookup(producer_properties, "length"), fps, _parse_time(producer.get_attribute("out"), fps, -1) + 1);
 				Clip clip;
 				clip.track = loaded.tracks.size();
 				clip.position = cursor;
-				clip.in = _parse_time(_attribute(node, "in"), fps, 0);
-				clip.out = _parse_time(_attribute(node, "out"), fps, MAX(clip.in, producer_length - 1));
+				clip.in = _parse_time(node.get_attribute("in"), fps, 0);
+				clip.out = _parse_time(node.get_attribute("out"), fps, MAX(clip.in, producer_length - 1));
 				if (clip.in < 0 || clip.out < clip.in) {
 					r_error = vformat("The entry of producer \"%s\" has illegal in/out points.", producer_id);
 					return ERR_INVALID_DATA;
@@ -723,7 +663,7 @@ Error TetraVideoProject::_load_xml(const String &p_xml, State &r_state, String &
 		if (!native && track_index == 0 && only_background && track_playlists.size() > 1) {
 			continue;
 		}
-		if (native && _attribute(nodes[sources[0]], "id") == "background") {
+		if (native && nodes[sources[0]].get_attribute("id") == "background") {
 			continue;
 		}
 		if (track.name.is_empty()) {
@@ -744,9 +684,16 @@ Error TetraVideoProject::_load_xml(const String &p_xml, State &r_state, String &
 		loaded.next_bin_id = _lookup(project_properties, "tetra:next_bin_id", "1").to_int();
 		loaded.next_clip_id = _lookup(project_properties, "tetra:next_clip_id", "1").to_int();
 	} else {
-		// A media file that only ever sat on audio tracks is an audio clip.
-		for (int i = 0; i < loaded.bin.size(); i++) {
-			if (!loaded.bin[i].has_video && loaded.bin[i].has_audio) {
+		for (int i = loaded.bin.size() - 1; i >= 0; i--) {
+			bool used = false;
+			for (const Clip &clip : loaded.clips) {
+				used = used || clip.bin_id == loaded.bin[i].id;
+			}
+			if (!used) {
+				// Only the skipped background track referred to it.
+				loaded.bin.remove_at(i);
+			} else if (!loaded.bin[i].has_video && loaded.bin[i].has_audio) {
+				// A media file that only ever sat on audio tracks is an audio clip.
 				loaded.bin.write[i].kind = CLIP_AUDIO;
 			}
 		}

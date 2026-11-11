@@ -15,6 +15,9 @@ namespace {
 // With no more operations than this every folder starts open.
 const int EXPAND_ALL_LIMIT = 40;
 
+// A search lists this many of its best matches; laying out thousands of rows on every keystroke would lag.
+const int MAX_SEARCH_RESULTS = 200;
+
 const char *CATEGORY_META = "tetra_category";
 
 String get_string(const Dictionary &p_dictionary, const char *p_key) {
@@ -29,7 +32,7 @@ String get_label(const Dictionary &p_operation) {
 
 } // namespace
 
-void TetraOperationBrowser::_update_tree() {
+void TetraOperationBrowser::_update_tree(bool p_select_best_match) {
 	updating_tree = true;
 	tree->clear();
 	TreeItem *root = tree->create_item();
@@ -50,11 +53,23 @@ void TetraOperationBrowser::_update_tree() {
 		tree->set_column_expand(1, true);
 		tree->set_column_expand_ratio(1, 2);
 		tree->set_column_clip_content(1, true);
-		for (const int index : TetraSchema::search_indices(operations, filter)) {
-			TreeItem *item = _add_operation(root, index, true);
-			if (!selected && get_string(operations[index], "id") == selected_id) {
+		const PackedInt32Array matches = TetraSchema::search_indices(operations, filter);
+		const int listed = MIN(int(matches.size()), MAX_SEARCH_RESULTS);
+		if (p_select_best_match) {
+			selected_id = listed > 0 ? get_string(operations[matches[0]], "id") : String();
+		}
+		for (int i = 0; i < listed; i++) {
+			TreeItem *item = _add_operation(root, matches[i], true);
+			if (!selected && get_string(operations[matches[i]], "id") == selected_id) {
 				selected = item;
 			}
+		}
+		if (matches.size() > listed) {
+			TreeItem *more = tree->create_item(root);
+			more->set_text(0, vformat(TTR("%d more matches. Type more to narrow the search."), int(matches.size()) - listed));
+			more->set_custom_color(0, get_theme_color(SNAME("font_disabled_color"), EditorStringName(Editor)));
+			more->set_selectable(0, false);
+			more->set_selectable(1, false);
 		}
 	}
 
@@ -168,15 +183,8 @@ void TetraOperationBrowser::_set_selected_from_user(const String &p_id) {
 
 void TetraOperationBrowser::_search_text_changed(const String &p_text) {
 	const String previous = selected_id;
-	// The best match becomes the selection, so that Enter runs it.
-	selected_id = String();
-	const PackedInt32Array matches = TetraSchema::search_indices(operations, p_text.strip_edges());
-	if (!p_text.strip_edges().is_empty() && !matches.is_empty()) {
-		selected_id = get_string(operations[matches[0]], "id");
-	} else if (p_text.strip_edges().is_empty()) {
-		selected_id = previous;
-	}
-	_update_tree();
+	// While searching the best match becomes the selection, so that Enter runs it.
+	_update_tree(true);
 	if (selected_id != previous && !selected_id.is_empty()) {
 		emit_signal(SNAME("operation_selected"), selected_id);
 	}
@@ -263,12 +271,10 @@ void TetraOperationBrowser::select_operation(const String &p_id) {
 	// An operation the current search does not list can only be shown by ending the search.
 	const String filter = search_edit->get_text().strip_edges();
 	if (!selected_id.is_empty() && !filter.is_empty()) {
+		const PackedInt32Array matches = TetraSchema::search_indices(operations, filter);
 		bool listed = false;
-		for (const int index : TetraSchema::search_indices(operations, filter)) {
-			if (get_string(operations[index], "id") == selected_id) {
-				listed = true;
-				break;
-			}
+		for (int i = 0; i < MIN(int(matches.size()), MAX_SEARCH_RESULTS) && !listed; i++) {
+			listed = get_string(operations[matches[i]], "id") == selected_id;
 		}
 		if (!listed) {
 			search_edit->set_text(String());
@@ -282,11 +288,7 @@ void TetraOperationBrowser::set_filter_text(const String &p_text) {
 		return;
 	}
 	search_edit->set_text(p_text);
-	const PackedInt32Array matches = TetraSchema::search_indices(operations, p_text.strip_edges());
-	if (!p_text.strip_edges().is_empty()) {
-		selected_id = matches.is_empty() ? String() : get_string(operations[matches[0]], "id");
-	}
-	_update_tree();
+	_update_tree(true);
 }
 
 String TetraOperationBrowser::get_filter_text() const {
