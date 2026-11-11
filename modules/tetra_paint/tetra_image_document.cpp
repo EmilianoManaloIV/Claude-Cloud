@@ -239,36 +239,8 @@ Rect2i TetraImageDocument::_diff_bounds(const float *p_a, const float *p_b) cons
 }
 
 Vector<float> TetraImageDocument::_image_to_linear(const Ref<Image> &p_image, bool p_force_linearise) {
-	Vector<float> pixels;
-	ERR_FAIL_COND_V(p_image.is_null() || p_image->is_empty(), pixels);
-	Ref<Image> image = p_image->duplicate();
-	if (image->is_compressed()) {
-		ERR_FAIL_COND_V(image->decompress() != OK, pixels);
-	}
-	if (image->has_mipmaps()) {
-		image->clear_mipmaps();
-	}
-	const Image::Format format = image->get_format();
-	const bool is_float = format >= Image::FORMAT_RF && format <= Image::FORMAT_RGBE9995;
-	image->convert(Image::FORMAT_RGBAF);
-	const int w = image->get_width();
-	const int h = image->get_height();
-	pixels.resize(int64_t(w) * h * 4);
-	float *dst = pixels.ptrw();
-	memcpy(dst, image->ptr(), sizeof(float) * 4 * size_t(w) * h);
-	if (!is_float || p_force_linearise) {
-		tetra_parallel_rows(h, w, [&](int p_first, int p_end) {
-			for (int64_t i = int64_t(p_first) * w; i < int64_t(p_end) * w; i++) {
-				for (int c = 0; c < 3; c++) {
-					dst[i * 4 + c] = TetraLayerModes::srgb_to_linear(dst[i * 4 + c]);
-				}
-			}
-		});
-	}
-	return pixels;
+	return tetra_image_to_linear(p_image, p_force_linearise);
 }
-
-// Layers.
 
 void TetraImageDocument::_finish_structure_change(DocState &p_before, bool p_redraw) {
 	_undo_push_state(p_before);
@@ -572,8 +544,6 @@ Color TetraImageDocument::blend_colors(LayerMode p_mode, const Color &p_backdrop
 	return Color(out[0], out[1], out[2], out[3]);
 }
 
-// Undo.
-
 void TetraImageDocument::_undo_open(const String &p_name) {
 	if (group_depth == 0) {
 		open_group = UndoGroup();
@@ -790,6 +760,15 @@ void TetraImageDocument::end_undo_group() {
 	_undo_close();
 }
 
+void TetraImageDocument::cancel_undo_group() {
+	TETRA_REQUIRE_IDLE();
+	ERR_FAIL_COND_MSG(group_depth == 0, "cancel_undo_group() without begin_undo_group().");
+	UndoGroup group = open_group;
+	open_group = UndoGroup();
+	group_depth = 0;
+	_apply_group(group, true);
+}
+
 bool TetraImageDocument::undo() {
 	if (stroke.active || group_depth > 0 || undo_stack.is_empty()) {
 		return false;
@@ -892,6 +871,8 @@ void TetraImageDocument::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("begin_undo_group", "name"), &TetraImageDocument::begin_undo_group);
 	ClassDB::bind_method(D_METHOD("end_undo_group"), &TetraImageDocument::end_undo_group);
+	ClassDB::bind_method(D_METHOD("cancel_undo_group"), &TetraImageDocument::cancel_undo_group);
+	ClassDB::bind_method(D_METHOD("is_undo_group_open"), &TetraImageDocument::is_undo_group_open);
 	ClassDB::bind_method(D_METHOD("undo"), &TetraImageDocument::undo);
 	ClassDB::bind_method(D_METHOD("redo"), &TetraImageDocument::redo);
 	ClassDB::bind_method(D_METHOD("can_undo"), &TetraImageDocument::can_undo);
@@ -953,4 +934,6 @@ void TetraImageDocument::_bind_methods() {
 	_bind_selection_methods();
 	_bind_paint_methods();
 	_bind_edit_methods();
+	_bind_operation_methods();
+	_bind_file_methods();
 }

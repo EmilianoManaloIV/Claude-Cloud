@@ -24,8 +24,6 @@
 using TetraLayerModes::linear_to_srgb;
 using TetraLayerModes::srgb_to_linear;
 
-// Schema helpers.
-
 static Dictionary make_param(const String &p_name, const String &p_label, const String &p_type, const Variant &p_default, const String &p_description) {
 	Dictionary param;
 	param["name"] = p_name;
@@ -883,10 +881,24 @@ Error TetraImageDocument::apply_operation(int p_layer_id, const String &p_operat
 	return OK;
 }
 
+Error TetraImageDocument::apply_filtered_image(int p_layer_id, const Ref<Image> &p_filtered, const String &p_name) {
+	TETRA_REQUIRE_IDLE_V(ERR_BUSY);
+	const int index = _find_layer(p_layer_id);
+	ERR_FAIL_COND_V(index < 0, ERR_DOES_NOT_EXIST);
+	ERR_FAIL_COND_V(p_filtered.is_null() || p_filtered->get_width() != width || p_filtered->get_height() != height, ERR_INVALID_PARAMETER);
+	const Vector<float> filtered = _image_to_linear(p_filtered);
+	ERR_FAIL_COND_V(filtered.is_empty(), ERR_INVALID_PARAMETER);
+	_undo_open(p_name);
+	_commit_pixels(index, _edit_rect(), filtered.ptr(), width, Point2i());
+	_undo_close();
+	return OK;
+}
+
 void TetraImageDocument::_bind_operation_methods() {
 	ClassDB::bind_static_method("TetraImageDocument", D_METHOD("get_native_operations"), &TetraImageDocument::get_native_operations);
 	ClassDB::bind_static_method("TetraImageDocument", D_METHOD("get_operations"), &TetraImageDocument::get_operations);
 	ClassDB::bind_static_method("TetraImageDocument", D_METHOD("filter_image", "image", "operation_id", "values"), &TetraImageDocument::filter_image);
 	ClassDB::bind_method(D_METHOD("compute_operation", "layer_id", "operation_id", "values"), &TetraImageDocument::compute_operation);
 	ClassDB::bind_method(D_METHOD("apply_operation", "layer_id", "operation_id", "values"), &TetraImageDocument::apply_operation);
+	ClassDB::bind_method(D_METHOD("apply_filtered_image", "layer_id", "filtered", "name"), &TetraImageDocument::apply_filtered_image);
 }

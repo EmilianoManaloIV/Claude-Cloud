@@ -190,15 +190,34 @@ Dictionary _metadata_parameter(Mlt::Properties &p_parameter) {
 			const String value = String::utf8(list.get(i));
 			option["value"] = mlt_type == "integer" ? Variant(value.to_int()) : Variant(value);
 			option["label"] = value;
-			options.push_back(option);
+			bool repeated = false;
+			for (int j = 0; j < options.size(); j++) {
+				repeated = repeated || Dictionary(options[j])["value"] == option["value"];
+			}
+			if (!repeated) {
+				options.push_back(option);
+			}
 		}
 	}
 	const String default_text = _text(p_parameter, "default");
 	String type = "string";
 	Variant default_value = default_text;
-	if (!options.is_empty() && (mlt_type == "string" || mlt_type == "integer")) {
+	const bool has_default = p_parameter.get("default") != nullptr;
+	if (!options.is_empty() && (mlt_type == "string" || (mlt_type == "integer" && has_default))) {
 		type = "enum";
 		default_value = mlt_type == "integer" ? Variant(default_text.to_int()) : Variant(default_text);
+		bool listed = false;
+		for (int i = 0; i < options.size(); i++) {
+			listed = listed || Dictionary(options[i])["value"] == default_value;
+		}
+		if (!listed) {
+			// Either the metadata names no default (the empty choice leaves the property unset)
+			// or it gives one in another notation than the listed keywords.
+			Dictionary option;
+			option["value"] = default_value;
+			option["label"] = has_default ? default_text : String("(default)");
+			options.push_front(option);
+		}
 	} else if (mlt_type == "integer") {
 		type = "int";
 		default_value = default_text.to_int();
@@ -221,16 +240,18 @@ Dictionary _metadata_parameter(Mlt::Properties &p_parameter) {
 	param["description"] = _text(p_parameter, "description");
 	param["type"] = type;
 	param["default"] = default_value;
-	if (!p_parameter.get("default")) {
+	if (!has_default) {
 		// The service has its own built-in default; the value is only sent once it is changed.
 		param["no_default"] = true;
 	}
 	if (type == "int" || type == "float") {
+		// Some generated metadata (LADSPA) states a default outside its own range; the range gives way.
+		const double number = default_value;
 		if (p_parameter.get("minimum")) {
-			param["min"] = _text(p_parameter, "minimum").to_float();
+			param["min"] = has_default ? MIN(number, _text(p_parameter, "minimum").to_float()) : _text(p_parameter, "minimum").to_float();
 		}
 		if (p_parameter.get("maximum")) {
-			param["max"] = _text(p_parameter, "maximum").to_float();
+			param["max"] = has_default ? MAX(number, _text(p_parameter, "maximum").to_float()) : _text(p_parameter, "maximum").to_float();
 		}
 	}
 	if (!_text(p_parameter, "unit").is_empty()) {
@@ -377,8 +398,15 @@ Dictionary TetraMltEngine::probe(const String &p_path, const Ref<TetraVideoProje
 	info["length"] = length;
 	info["duration"] = length / fps;
 	info["fps"] = source_fps;
-	info["width"] = has_video ? producer->get_int("meta.media.width") : 0;
-	info["height"] = has_video ? producer->get_int("meta.media.height") : 0;
+	// avformat describes each stream when the file is opened; "meta.media.width" only appears with the first frame.
+	int width = producer->get_int("meta.media.width");
+	int height = producer->get_int("meta.media.height");
+	if (media && has_video && (width < 1 || height < 1)) {
+		width = producer->get_int(vformat("meta.media.%d.codec.width", video_index).utf8().get_data());
+		height = producer->get_int(vformat("meta.media.%d.codec.height", video_index).utf8().get_data());
+	}
+	info["width"] = has_video ? width : 0;
+	info["height"] = has_video ? height : 0;
 	info["has_video"] = has_video;
 	info["has_audio"] = has_audio;
 	info["sample_rate"] = has_audio ? producer->get_int(vformat("meta.media.%d.codec.sample_rate", audio_index).utf8().get_data()) : 0;
@@ -493,13 +521,12 @@ Ref<Image> TetraMltEngine::get_thumbnail(const Variant &p_source, int p_frame, c
 	}
 	const bool from_bin = p_source.get_type() == Variant::DICTIONARY;
 	const String key = (from_bin ? "bin:" : "file:") + p_source.operator String();
-	MutexLock lock(mlt_mutex);
-	Graph *source = thumbnail_graphs.has(key) ? thumbnail_graphs[key] : nullptr;
-	if (!source) {
-		source = memnew(Graph);
-		_set_profile(source->profile, profile_width, profile_height, profile_fps_num, profile_fps_den);
-		if (from_bin) {
-			// A one-clip project goes through the same XML writer as the timeline, so a title or a colour looks the same here.
+	String xml;
+	{
+		MutexLock lock(mlt_mutex);
+		if (!thumbnail_graphs.has(key) && from_bin) {
+			// A one-clip project goes through the same XML writer as the timeline, so a title or a colour looks
+			// the same here. It is written before MLT is locked for good, because the writer consults the catalog.
 			const Dictionary bin = p_source;
 			Ref<TetraVideoProject> single;
 			single.instantiate();
@@ -510,7 +537,18 @@ Ref<Image> TetraMltEngine::get_thumbnail(const Variant &p_source, int p_frame, c
 			if (id > 0 && single->insert_clip(id, 0, 0) > 0) {
 				Dictionary options;
 				options["tetra_properties"] = false;
-				source->producer = new Mlt::Producer(source->profile, "xml-string", single->to_mlt_xml(options).utf8().get_data());
+				xml = single->to_mlt_xml(options);
+			}
+		}
+	}
+	MutexLock lock(mlt_mutex);
+	Graph *source = thumbnail_graphs.has(key) ? thumbnail_graphs[key] : nullptr;
+	if (!source) {
+		source = memnew(Graph);
+		_set_profile(source->profile, profile_width, profile_height, profile_fps_num, profile_fps_den);
+		if (from_bin) {
+			if (!xml.is_empty()) {
+				source->producer = new Mlt::Producer(source->profile, "xml-string", xml.utf8().get_data());
 			}
 		} else {
 			const String path = _globalize(p_source);
@@ -851,15 +889,20 @@ void TetraMltEngine::_ensure_thread() {
 }
 
 // The sound goes to the AudioServer through a generator stream that the
-// engine owns, so no AudioStreamPlayer node is needed.
-void TetraMltEngine::_ensure_audio() {
+// engine owns, so no AudioStreamPlayer node is needed. Every start gets a
+// fresh playback, and with it an empty ring buffer: sound queued before a
+// pause or a seek must not be heard afterwards.
+void TetraMltEngine::_start_audio() {
+	_stop_audio();
 	MutexLock lock(control_mutex);
-	if (audio_playback.is_valid() || !AudioServer::get_singleton()) {
+	if (!AudioServer::get_singleton()) {
 		return;
 	}
-	audio_generator.instantiate();
-	audio_generator->set_mix_rate_mode(AudioStreamGenerator::MIX_RATE_OUTPUT);
-	audio_generator->set_buffer_length(1.0);
+	if (audio_generator.is_null()) {
+		audio_generator.instantiate();
+		audio_generator->set_mix_rate_mode(AudioStreamGenerator::MIX_RATE_OUTPUT);
+		audio_generator->set_buffer_length(1.0);
+	}
 	audio_playback = audio_generator->instantiate_playback();
 	Vector<AudioFrame> volumes;
 	volumes.resize(AudioServer::MAX_CHANNELS_PER_BUS);
@@ -867,6 +910,14 @@ void TetraMltEngine::_ensure_audio() {
 		volumes.write[i] = i == 0 ? AudioFrame(1, 1) : AudioFrame(0, 0);
 	}
 	AudioServer::get_singleton()->start_playback_stream(audio_playback, audio_bus, volumes);
+}
+
+void TetraMltEngine::_stop_audio() {
+	MutexLock lock(control_mutex);
+	if (audio_playback.is_valid() && AudioServer::get_singleton()) {
+		AudioServer::get_singleton()->stop_playback_stream(audio_playback);
+	}
+	audio_playback.unref();
 }
 
 void TetraMltEngine::_publish(const Ref<Image> &p_image, int p_frame, uint64_t p_generation) {
@@ -910,6 +961,7 @@ void TetraMltEngine::_emit_playback_finished() {
 }
 
 void TetraMltEngine::play() {
+	bool with_sound = false;
 	{
 		MutexLock lock(control_mutex);
 		if (length < 1 || playing) {
@@ -923,41 +975,61 @@ void TetraMltEngine::play() {
 		}
 		playing = true;
 		generation++;
+		with_sound = speed == 1.0;
 	}
-	_ensure_audio();
+	if (with_sound) {
+		_start_audio();
+	}
 	_ensure_thread();
 }
 
 void TetraMltEngine::pause() {
-	MutexLock lock(control_mutex);
-	if (playing) {
-		playing = false;
-		generation++;
+	{
+		MutexLock lock(control_mutex);
+		if (playing) {
+			playing = false;
+			generation++;
+		}
 	}
+	_stop_audio();
 }
 
 void TetraMltEngine::seek(int p_frame) {
+	bool with_sound = false;
 	{
 		MutexLock lock(control_mutex);
 		position = CLAMP(p_frame, 0, MAX(0, length - 1));
 		generation++;
 		refresh_requested = true;
+		with_sound = playing && speed == 1.0;
+	}
+	if (with_sound) {
+		_start_audio();
+	} else {
+		_stop_audio();
 	}
 	_ensure_thread();
 }
 
 void TetraMltEngine::set_speed(double p_speed) {
-	MutexLock lock(control_mutex);
 	if (p_speed == 0.0) {
-		if (playing) {
-			playing = false;
-			generation++;
-		}
+		pause();
 		return;
 	}
-	if (speed != p_speed) {
+	bool with_sound = false;
+	{
+		MutexLock lock(control_mutex);
+		if (speed == p_speed) {
+			return;
+		}
 		speed = p_speed;
 		generation++;
+		with_sound = playing && speed == 1.0;
+	}
+	if (with_sound) {
+		_start_audio();
+	} else {
+		_stop_audio();
 	}
 }
 
@@ -1045,9 +1117,13 @@ TetraMltEngine::~TetraMltEngine() {
 	if (thread.is_started()) {
 		thread.wait_to_finish();
 	}
-	if (audio_playback.is_valid() && AudioServer::get_singleton()) {
-		AudioServer::get_singleton()->stop_playback_stream(audio_playback);
+	Ref<AudioStreamGeneratorPlayback> last_playback = audio_playback;
+	_stop_audio();
+	// The playback points at its generator; the generator may only go once the mixer has let go of the playback.
+	for (int i = 0; i < 200 && last_playback.is_valid() && AudioServer::get_singleton() && AudioServer::get_singleton()->is_playback_active(last_playback); i++) {
+		OS::get_singleton()->delay_usec(1000);
 	}
+	last_playback.unref();
 	_drop_graph();
 	_drop_thumbnails();
 }

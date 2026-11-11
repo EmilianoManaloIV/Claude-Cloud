@@ -8,6 +8,23 @@ Import("env_modules")
 
 env_tetra_paint = env_modules.Clone()
 
+# The GEGL filter bridge is optional. With libgegl-0.4 present, gegl/ is
+# compiled with TETRA_GEGL_ENABLED and the libraries join the final link;
+# without it TetraGegl is built as an "engine unavailable" shell.
+if os.system("pkg-config --exists gegl-0.4") == 0:
+    cflags = env.ParseFlags("!pkg-config gegl-0.4 --cflags")
+    # -isystem keeps the GLib and GEGL headers out of -Wshadow and friends.
+    for path in cflags["CPPPATH"]:
+        env_tetra_paint.Append(CCFLAGS=["-isystem", path])
+    env_tetra_paint.Append(CPPDEFINES=cflags["CPPDEFINES"] + ["TETRA_GEGL_ENABLED"])
+
+    link = env.ParseFlags("!pkg-config gegl-0.4 --libs")
+    env.AppendUnique(LIBPATH=link["LIBPATH"])
+    env.Append(LIBS=link["LIBS"])
+    # GEGL's plug-ins link against libgegl themselves, so the executable does
+    # not need --export-dynamic (it would bloat the dynamic symbol table).
+    env.AppendUnique(LINKFLAGS=[flag for flag in link["LINKFLAGS"] if "export-dynamic" not in str(flag)])
+
 # Every .cpp below this directory belongs to the module, except the cores'
 # standalone unit tests (built by the top-level CMakeLists.txt instead).
 module_dir = Dir(".").srcnode().abspath

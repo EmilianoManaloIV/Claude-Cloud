@@ -63,7 +63,8 @@ class TetraMltEngine : public RefCounted {
 	static void _thread_main(void *p_self);
 	void _run_playback();
 	void _ensure_thread();
-	void _ensure_audio();
+	void _start_audio();
+	void _stop_audio();
 	void _publish(const Ref<Image> &p_image, int p_frame, uint64_t p_generation);
 	void _finish_playback(int p_frame, uint64_t p_generation);
 	void _emit_frame_ready();

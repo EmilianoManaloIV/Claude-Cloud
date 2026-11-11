@@ -51,7 +51,7 @@ func run() -> void:
 	var stand_in := FileAccess.open(bin.path_join("blender"), FileAccess.WRITE)
 	stand_in.store_string("#!/bin/sh\nfor argument in \"$@\"; do\n\tif [ \"$previous\" = \"--python\" ]; then script=\"$argument\"; fi\n\tprevious=\"$argument\"\ndone\nexec \"%s\" \"$script\" \"$@\"\n" % python)
 	stand_in.close()
-	FileAccess.set_unix_permissions(bin.path_join("blender"), 0o755)
+	FileAccess.set_unix_permissions(bin.path_join("blender"), FileAccess.UNIX_READ_OWNER | FileAccess.UNIX_WRITE_OWNER | FileAccess.UNIX_EXECUTE_OWNER)
 	OS.set_environment("PATH", bin + ":" + search_path)
 	launcher = TetraBlenderBridge.find_launcher()
 	check(launcher["kind"] == "blender" and launcher["path"] == bin.path_join("blender") and str(launcher["description"]).contains("found on PATH"), "blender on PATH: %s" % launcher)

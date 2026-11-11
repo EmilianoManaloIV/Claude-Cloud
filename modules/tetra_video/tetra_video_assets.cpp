@@ -156,8 +156,10 @@ Dictionary _parse_parameter(const Vector<TetraXmlNode> &p_nodes, int p_node, int
 		param["type"] = integer ? "int" : "float";
 		param["default"] = integer ? Variant(int64_t(Math::round(value))) : Variant(value);
 		if (has_min && has_max && maximum > minimum) {
-			param["min"] = minimum;
-			param["max"] = maximum;
+			// A few of Kdenlive's files have a default outside their own range; the range gives way so that
+			// an untouched parameter still sends the default.
+			param["min"] = MIN(minimum, value);
+			param["max"] = MAX(maximum, value);
 		}
 		if (integer) {
 			param["step"] = 1.0;
@@ -261,10 +263,13 @@ void _load_assets(const String &p_path, bool p_transitions, const HashMap<String
 		const String label = _child_text(nodes, index, "name");
 		Dictionary fixed;
 		Array params;
+		HashSet<String> names;
 		for (int child : node.children) {
 			if (nodes[child].name == "parameter") {
 				const Dictionary param = _parse_parameter(nodes, child, p_width, p_height, fixed);
-				if (!param.is_empty()) {
+				// A name listed twice in a file is one MLT property: the first description wins.
+				if (!param.is_empty() && !names.has(param["name"])) {
+					names.insert(param["name"]);
 					params.push_back(param);
 				}
 			}
@@ -450,7 +455,7 @@ Dictionary TetraVideoAssets::values_to_mlt_properties(const Dictionary &p_operat
 		if (type == "int" || type == "float") {
 			const double factor = param.get("factor", 1.0);
 			const double number = double(value) / factor;
-			text = type == "int" && factor == 1.0 ? itos(int64_t(Math::round(number))) : String::num(number);
+			text = type == "int" && factor == 1.0 ? itos(int64_t(Math::round(number))) : TetraVideoProject::value_to_mlt(number);
 		} else if (type == "bool") {
 			if (param.has("switch_on")) {
 				text = bool(value) ? param["switch_on"] : param["switch_off"];

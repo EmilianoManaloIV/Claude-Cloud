@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/io/image.h"
 #include "core/object/worker_thread_pool.h"
 
 #include <type_traits>
@@ -53,3 +54,8 @@ uint8_t tetra_linear_to_srgb8(float p_value);
 // Separable Gaussian blur of an interleaved float image with p_channels
 // components; edges are clamped. p_src and p_dst may be the same buffer.
 void tetra_gaussian_blur(const float *p_src, float *p_dst, int p_width, int p_height, int p_channels, float p_sigma_x, float p_sigma_y);
+
+// Converts any image to linear RGBA floats (width * height * 4). Integer
+// formats are taken as sRGB-encoded and linearised; float formats are kept as
+// they are unless p_force_linearise is set. Empty on failure.
+Vector<float> tetra_image_to_linear(const Ref<Image> &p_image, bool p_force_linearise);

@@ -308,6 +308,11 @@ public:
 	// Undo.
 	void begin_undo_group(const String &p_name);
 	void end_undo_group();
+	// Reverts everything recorded since the outermost begin_undo_group() and
+	// drops the group: nothing joins the history and the redo stack is kept.
+	// This is how a live preview or an interactive drag is taken back.
+	void cancel_undo_group();
+	bool is_undo_group_open() const { return group_depth > 0; }
 	bool undo();
 	bool redo();
 	bool can_undo() const { return !undo_stack.is_empty(); }
@@ -370,6 +375,10 @@ public:
 	static Ref<Image> filter_image(const Ref<Image> &p_image, const String &p_operation_id, const Dictionary &p_values);
 	Ref<Image> compute_operation(int p_layer_id, const String &p_operation_id, const Dictionary &p_values) const;
 	Error apply_operation(int p_layer_id, const String &p_operation_id, const Dictionary &p_values);
+	// Commits the canvas-sized result of filter_image() on this layer, computed
+	// elsewhere (for example on a worker thread), exactly as apply_operation()
+	// would: through the selection and the alpha lock, as one undo step.
+	Error apply_filtered_image(int p_layer_id, const Ref<Image> &p_filtered, const String &p_name);
 
 	// Files.
 	Error load(const String &p_path);

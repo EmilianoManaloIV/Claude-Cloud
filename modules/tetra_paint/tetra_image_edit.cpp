@@ -247,8 +247,6 @@ Color TetraImageDocument::pick_color(const Vector2i &p_point, bool p_sample_merg
 	return Color(sum[0] / sum[3], sum[1] / sum[3], sum[2] / sum[3], sum[3] / count);
 }
 
-// Transforms.
-
 enum RemapKind {
 	REMAP_FLIP_HORIZONTAL,
 	REMAP_FLIP_VERTICAL,

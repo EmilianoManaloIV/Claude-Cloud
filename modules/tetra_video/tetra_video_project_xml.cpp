@@ -140,7 +140,8 @@ String TetraVideoProject::value_to_mlt(const Variant &p_value) {
 		case Variant::INT:
 			return itos(p_value);
 		case Variant::FLOAT:
-			return String::num(double(p_value));
+			// "1" rather than "1.0": the shortest form MLT reads back as the same number.
+			return String::num(double(p_value)).trim_suffix(".0");
 		case Variant::COLOR:
 			return "0x" + Color(p_value).to_html(true);
 		case Variant::VECTOR2: {

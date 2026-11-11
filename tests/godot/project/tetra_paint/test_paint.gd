@@ -189,7 +189,7 @@ func test_soft_brush() -> void:
 
 	# A hard brush has an antialiased rim of about one pixel.
 	var hard := new_doc(32, 32)
-	hard.stroke_line(hard.get_active_layer(), TetraImageDocument.TOOL_PAINTBRUSH, {"color": BLACK, "size": 20.0, "hardness": 1.0}, Vector2(16, 16), Vector2(16, 16))
+	hard.stroke_line(hard.get_active_layer(), TetraImageDocument.TOOL_PAINTBRUSH, {"color": BLACK, "size": 20.0, "hardness": 1.0}, Vector2(16.5, 16.5), Vector2(16.5, 16.5))
 	check_color(px(hard, 25, 16), BLACK, "hard brush is solid inside")
 	var rim := px(hard, 26, 16).r
 	check(rim > 0.0 and rim < 1.0, "hard brush rim is antialiased: %f" % rim)

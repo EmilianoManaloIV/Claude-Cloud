@@ -334,6 +334,27 @@ func _test_async() -> void:
 		check(order[3][1].get("ok") == false and str(order[3][1].get("error")).contains("NO_SUCH_MODIFIER") and not order[3][1].has("mesh"), "failures arrive as ok = false")
 	check(not _bridge.is_busy(), "idle again")
 
+	# Blocking requests from several threads at once queue behind each other.
+	var guard := Mutex.new()
+	var outcomes := []
+	var threads: Array[Thread] = []
+	for i in 4:
+		var thread := Thread.new()
+		thread.start(func() -> void:
+			for j in 5:
+				var reply := _bridge.request({"cmd": "create_primitive", "primitive": "blender:mesh.primitive_cube_add", "values": {"size": float(i + 1)}, "output": _bridge.get_exchange_dir().path_join("thread-%d.tmsh" % i)})
+				guard.lock()
+				outcomes.append(reply.get("ok") == true and reply.get("vertex_count") == 8.0)
+				guard.unlock())
+		threads.append(thread)
+	for thread in threads:
+		thread.wait_to_finish()
+	check_eq(outcomes.count(true), 20, "20 requests from 4 threads are all answered")
+	for i in 4:
+		var written := TetraBlenderMesh.read_file(_bridge.get_exchange_dir().path_join("thread-%d.tmsh" % i))
+		check(written != null and written.get_aabb().size.is_equal_approx(Vector3.ONE * float(i + 1)), "thread %d got its own answer" % i)
+		DirAccess.remove_absolute(_bridge.get_exchange_dir().path_join("thread-%d.tmsh" % i))
+
 
 func _test_render() -> void:
 	var grey := StandardMaterial3D.new()

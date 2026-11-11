@@ -36,9 +36,12 @@ Error tetra_parse_xml(const String &p_xml, Vector<TetraXmlNode> &r_nodes, String
 				}
 				stack.resize(stack.size() - 1);
 			} break;
-			case XMLParser::NODE_TEXT:
-			case XMLParser::NODE_CDATA: {
+			case XMLParser::NODE_TEXT: {
 				r_nodes.write[stack[stack.size() - 1]].text += parser->get_node_data();
+			} break;
+			case XMLParser::NODE_CDATA: {
+				// XMLParser hands out the content of a CDATA section as the node's name.
+				r_nodes.write[stack[stack.size() - 1]].text += parser->get_node_name();
 			} break;
 			default:
 				break;
