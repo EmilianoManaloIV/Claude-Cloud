@@ -214,7 +214,10 @@ private:
 	void _reset(int p_width, int p_height);
 	int _append_layer(const String &p_name, const Vector<float> &p_pixels);
 	Vector<float> _new_buffer(const float *p_fill = nullptr) const;
-	void _composite_into(const Rect2i &p_rect, float *r_out, int p_only_below_index = -1) const;
+	void _composite_row(int p_y, int p_x, int p_count, float *r_row) const;
+	void _composite_into(const Rect2i &p_rect, float *r_out) const;
+	Rect2i _diff_bounds(const float *p_a, const float *p_b) const;
+	void _finish_structure_change(DocState &p_before, bool p_redraw);
 	void _mix_into(float *p_dest, const Rect2i &p_rect, const float *p_src, int p_src_width, const Point2i &p_src_origin, bool p_lock_alpha, bool p_use_selection) const;
 	void _commit_pixels(int p_index, const Rect2i &p_rect, const float *p_src, int p_src_width, const Point2i &p_src_origin, bool p_use_selection = true);
 	static Vector<float> _image_to_linear(const Ref<Image> &p_image, bool p_force_linearise = false);

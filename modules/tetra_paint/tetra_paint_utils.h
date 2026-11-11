@@ -40,6 +40,13 @@ void tetra_parallel_rows(int p_rows, int p_width, F &&p_func) {
 	});
 }
 
+// Builds the lookup tables below. Called once when the module is registered.
+void tetra_paint_utils_initialize();
+
+// Fails a document method while a paint stroke is in progress.
+#define TETRA_REQUIRE_IDLE_V(m_retval) ERR_FAIL_COND_V_MSG(stroke.active, m_retval, "The document cannot be changed while a paint stroke is active.")
+#define TETRA_REQUIRE_IDLE() ERR_FAIL_COND_MSG(stroke.active, "The document cannot be changed while a paint stroke is active.")
+
 // Linear float to 8-bit sRGB with correct rounding.
 uint8_t tetra_linear_to_srgb8(float p_value);
 
