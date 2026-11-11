@@ -1,0 +1,11 @@
+diff --git a/version.py b/version.py
+index 4b0e55c..54ee62f 100644
+--- a/version.py
++++ b/version.py
+@@ -1,5 +1,5 @@
+ short_name = "godot"
+-name = "Godot Engine"
++name = "Tetra Studio"
+ major = 4
+ minor = 7
+ patch = 2

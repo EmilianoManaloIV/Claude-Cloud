@@ -1,0 +1,31 @@
+[submodule "upstream/godot"]
+	path = upstream/godot
+	url = https://github.com/godotengine/godot
+	shallow = true
+	ignore = dirty
+	branch = 4.7.2-stable
+[submodule "upstream/blender"]
+	path = upstream/blender
+	url = https://github.com/blender/blender
+	shallow = true
+	ignore = dirty
+[submodule "upstream/gimp"]
+	path = upstream/gimp
+	url = https://github.com/GNOME/gimp
+	shallow = true
+	ignore = dirty
+[submodule "upstream/kdenlive"]
+	path = upstream/kdenlive
+	url = https://github.com/KDE/kdenlive
+	shallow = true
+	ignore = dirty
+[submodule "upstream/mlt"]
+	path = upstream/mlt
+	url = https://github.com/mltframework/mlt
+	shallow = true
+	ignore = dirty
+[submodule "upstream/gegl"]
+	path = upstream/gegl
+	url = https://github.com/GNOME/gegl
+	shallow = true
+	ignore = dirty
