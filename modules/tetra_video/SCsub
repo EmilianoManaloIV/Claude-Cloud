@@ -8,6 +8,21 @@ Import("env_modules")
 
 env_tetra_video = env_modules.Clone()
 
+# The MLT engine is optional. With libmlt++-7 present its sources are compiled
+# with TETRA_MLT_ENABLED and the libraries join the final link; without it the
+# same classes are built as "engine unavailable" shells.
+if os.system("pkg-config --exists mlt++-7") == 0:
+    cflags = env.ParseFlags("!pkg-config mlt++-7 --cflags")
+    # -isystem keeps MLT's own headers out of -Wshadow and friends.
+    for path in cflags["CPPPATH"]:
+        env_tetra_video.Append(CCFLAGS=["-isystem", path])
+    env_tetra_video.Append(CPPDEFINES=cflags["CPPDEFINES"] + ["TETRA_MLT_ENABLED"])
+
+    link = env.ParseFlags("!pkg-config mlt++-7 --libs")
+    env.AppendUnique(LIBPATH=link["LIBPATH"])
+    env.Append(LIBS=link["LIBS"])
+    env.AppendUnique(LINKFLAGS=link["LINKFLAGS"])
+
 # Every .cpp below this directory belongs to the module, except the cores'
 # standalone unit tests (built by the top-level CMakeLists.txt instead).
 module_dir = Dir(".").srcnode().abspath
