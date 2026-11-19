@@ -255,9 +255,11 @@ windows_deps() {
 	done
 }
 
-# True when a DLL imports something that is neither found nor a Windows API set.
-windows_has_missing_deps() {
-	ntldd -R "$1" 2>/dev/null | grep -i 'not found' | grep -qviE 'api-ms-win-|ext-ms-'
+# Print the DLLs a file imports directly that cannot be found (Windows API
+# sets aside). Not recursive on purpose: followed into the Windows system
+# DLLs, the walk always ends at some optional DLL that does not exist.
+windows_missing_deps() {
+	ntldd "$1" 2>/dev/null | grep -i 'not found' | grep -viE 'api-ms-win-|ext-ms-' | awk '{ print $1 }' | tr '\n' ' '
 }
 
 package_windows() {
@@ -294,16 +296,19 @@ package_windows() {
 	ls -d "$STAGE"/lib/mlt* "$STAGE"/share/mlt* >/dev/null || { log "the MLT module or data directory is missing"; exit 1; }
 	find "$STAGE/lib" -type f \( -name '*.a' -o -name '*.la' -o -name '*.def' \) -delete
 
-	local module
+	local module missing
 	for module in "$STAGE"/lib/mlt*/*.dll; do
+		missing="$(windows_missing_deps "$module")"
 		if mlt_module_skipped "$(basename "$module")"; then
 			log "leaving out MLT module $(basename "$module")"
 			rm -f "$module"
-		elif windows_has_missing_deps "$module"; then
-			log "leaving out MLT module $(basename "$module"): its libraries are not installed"
+		elif [ -n "$missing" ]; then
+			log "leaving out MLT module $(basename "$module"): not installed: $missing"
 			rm -f "$module"
 		fi
 	done
+	ls "$STAGE"/lib/mlt*/libmltcore.dll "$STAGE"/lib/mlt*/libmltavformat.dll >/dev/null \
+		|| { log "the MLT core or avformat module did not survive packaging"; exit 1; }
 
 	log "collecting DLLs"
 	local files=()
