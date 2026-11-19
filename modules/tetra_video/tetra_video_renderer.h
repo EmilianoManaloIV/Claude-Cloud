@@ -51,6 +51,7 @@ public:
 	static TypedArray<Dictionary> get_presets();
 	static Dictionary get_preset(const String &p_id);
 	static String find_melt();
+	static bool is_project_source(const Ref<TetraVideoProject> &p_project, const String &p_path);
 	static PackedStringArray expand_preset_arguments(const Dictionary &p_preset, const Dictionary &p_options);
 
 	Error start(const Ref<TetraVideoProject> &p_project, const String &p_output_path, const String &p_preset_id, const Dictionary &p_options = Dictionary());

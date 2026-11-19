@@ -176,6 +176,23 @@ PackedStringArray TetraVideoRenderer::expand_preset_arguments(const Dictionary &
 	return result;
 }
 
+// Whether the path names one of the files the project's bin clips play.
+bool TetraVideoRenderer::is_project_source(const Ref<TetraVideoProject> &p_project, const String &p_path) {
+	ERR_FAIL_COND_V(p_project.is_null(), false);
+	const String path = ProjectSettings::get_singleton()->globalize_path(p_path).simplify_path();
+	for (int id : p_project->get_bin_clip_ids()) {
+		const Dictionary bin = p_project->get_bin_clip(id);
+		const int kind = bin["kind"];
+		if (kind == TetraVideoProject::CLIP_COLOR || kind == TetraVideoProject::CLIP_TEXT) {
+			continue;
+		}
+		if (ProjectSettings::get_singleton()->globalize_path(bin["source"]).simplify_path() == path) {
+			return true;
+		}
+	}
+	return false;
+}
+
 Error TetraVideoRenderer::start(const Ref<TetraVideoProject> &p_project, const String &p_output_path, const String &p_preset_id, const Dictionary &p_options) {
 	ERR_FAIL_COND_V(p_project.is_null(), ERR_INVALID_PARAMETER);
 	if (running.is_set()) {
@@ -207,6 +224,11 @@ Error TetraVideoRenderer::start(const Ref<TetraVideoProject> &p_project, const S
 	if (output.begins_with("res://") || output.begins_with("user://")) {
 		output = ProjectSettings::get_singleton()->globalize_path(output);
 	}
+	if (is_project_source(p_project, output)) {
+		// melt would truncate the file while it reads it.
+		last_error = vformat("\"%s\" is a source clip of this project. Choose another output file.", output);
+		return ERR_FILE_ALREADY_IN_USE;
+	}
 	if (DirAccess::make_dir_recursive_absolute(output.get_base_dir()) != OK) {
 		last_error = vformat("Cannot create the folder of \"%s\".", output);
 		return ERR_CANT_CREATE;
@@ -214,10 +236,6 @@ Error TetraVideoRenderer::start(const Ref<TetraVideoProject> &p_project, const S
 
 	Dictionary xml_options;
 	xml_options["tetra_properties"] = false;
-	if (p_options.has("width") && p_options.has("height")) {
-		xml_options["width"] = p_options["width"];
-		xml_options["height"] = p_options["height"];
-	}
 	const String scratch = OS::get_singleton()->get_cache_path().path_join("tetra-studio");
 	DirAccess::make_dir_recursive_absolute(scratch);
 	const String xml_file = scratch.path_join(vformat("render-%d-%d.mlt", OS::get_singleton()->get_process_id(), OS::get_singleton()->get_ticks_usec()));
@@ -236,6 +254,17 @@ Error TetraVideoRenderer::start(const Ref<TetraVideoProject> &p_project, const S
 	arguments.push_back("-progress");
 	arguments.push_back("-consumer");
 	arguments.push_back("avformat:" + output);
+	if (p_options.has("width") && p_options.has("height")) {
+		// The consumer scales. The profile keeps the project's size, in whose pixels the effects' rectangles,
+		// offsets and sizes are stored.
+		arguments.push_back("width=" + itos(MAX(2, int(p_options["width"]))));
+		arguments.push_back("height=" + itos(MAX(2, int(p_options["height"]))));
+		// A consumer that is given a size takes the rest of its picture format from MLT's default (PAL DV:
+		// interlaced, non-square pixels) unless it is told, and melt 7.22 crashes on some heights that way.
+		arguments.push_back("progressive=1");
+		arguments.push_back("sample_aspect_num=1");
+		arguments.push_back("sample_aspect_den=1");
+	}
 	for (const String &argument : expand_preset_arguments(preset, p_options)) {
 		arguments.push_back(argument);
 	}
@@ -415,6 +444,7 @@ TetraVideoRenderer::~TetraVideoRenderer() {
 void TetraVideoRenderer::_bind_methods() {
 	ClassDB::bind_static_method("TetraVideoRenderer", D_METHOD("get_presets"), &TetraVideoRenderer::get_presets);
 	ClassDB::bind_static_method("TetraVideoRenderer", D_METHOD("get_preset", "id"), &TetraVideoRenderer::get_preset);
+	ClassDB::bind_static_method("TetraVideoRenderer", D_METHOD("is_project_source", "project", "path"), &TetraVideoRenderer::is_project_source);
 	ClassDB::bind_static_method("TetraVideoRenderer", D_METHOD("find_melt"), &TetraVideoRenderer::find_melt);
 	ClassDB::bind_static_method("TetraVideoRenderer", D_METHOD("expand_preset_arguments", "preset", "options"), &TetraVideoRenderer::expand_preset_arguments);
 

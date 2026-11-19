@@ -5,6 +5,7 @@
 #include "tetra_video_xml.h"
 
 #include "core/config/project_settings.h"
+#include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 #include "core/variant/variant_utility.h"
 
@@ -350,13 +351,37 @@ String TetraVideoProject::to_mlt_xml(const Dictionary &p_options) const {
 }
 
 Error TetraVideoProject::save(const String &p_path) {
+	// The document goes to a file of its own first and replaces the project file only once all of it is on disk:
+	// a write that fails half way (disk full, quota) must not cost the last good save.
+	const CharString text = to_mlt_xml().utf8();
+	const String temporary = p_path + ".tmp";
 	Error error = OK;
-	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::WRITE, &error);
+	Ref<FileAccess> file = FileAccess::open(temporary, FileAccess::WRITE, &error);
 	if (file.is_null()) {
 		last_error = vformat("Cannot write \"%s\".", p_path);
 		return error == OK ? ERR_FILE_CANT_WRITE : error;
 	}
-	file->store_string(to_mlt_xml());
+	bool written = file->store_buffer((const uint8_t *)text.get_data(), text.length());
+	file->flush();
+	written = written && file->get_error() == OK;
+	file.unref();
+	// Buffered data may only fail when the file is closed, so the size on disk has the last word.
+	Ref<FileAccess> check = FileAccess::open(temporary, FileAccess::READ);
+	written = written && check.is_valid() && check->get_length() == uint64_t(text.length());
+	check.unref();
+	Ref<DirAccess> directory = DirAccess::create_for_path(temporary);
+	if (!written) {
+		directory->remove(temporary);
+		last_error = vformat("\"%s\" could not be written completely. The previous file was kept.", p_path);
+		return ERR_FILE_CANT_WRITE;
+	}
+	error = directory->rename(temporary, p_path);
+	if (error != OK) {
+		directory->remove(temporary);
+		last_error = vformat("Cannot replace \"%s\".", p_path);
+		return error;
+	}
+	foreign = false;
 	last_error = String();
 	return OK;
 }
@@ -374,18 +399,23 @@ Error TetraVideoProject::load(const String &p_path) {
 Error TetraVideoProject::load_from_xml(const String &p_xml) {
 	State loaded;
 	String message;
-	const Error error = _load_xml(p_xml, loaded, message);
+	bool loaded_foreign = false;
+	const Error error = _load_xml(p_xml, loaded, message, loaded_foreign);
 	if (error != OK) {
 		last_error = message;
 		return error;
 	}
+	for (Track &track : loaded.tracks) {
+		track.uid = next_track_uid++;
+	}
+	foreign = loaded_foreign;
 	last_error = String();
 	clear_undo_history();
 	_apply_state(loaded);
 	return OK;
 }
 
-Error TetraVideoProject::_load_xml(const String &p_xml, State &r_state, String &r_error) const {
+Error TetraVideoProject::_load_xml(const String &p_xml, State &r_state, String &r_error, bool &r_foreign) const {
 	Vector<TetraXmlNode> nodes;
 	const Error parse_error = tetra_parse_xml(p_xml, nodes, r_error);
 	if (parse_error != OK) {
@@ -705,5 +735,6 @@ Error TetraVideoProject::_load_xml(const String &p_xml, State &r_state, String &
 		return ERR_INVALID_DATA;
 	}
 	r_state = loaded;
+	r_foreign = !native;
 	return OK;
 }

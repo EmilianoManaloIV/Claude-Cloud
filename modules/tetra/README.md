@@ -187,7 +187,7 @@ ellipsised when narrow) and a control for the type on the right.
 | Type | Control |
 | --- | --- |
 | `bool` | `CheckBox` |
-| `int`, `float` | `EditorSpinSlider`. The slider spans `ui_min`..`ui_max` (falling back to `min`..`max`); typed values may go beyond the slider and are clamped to `min`/`max`. Without a range there is no slider (an int gets up/down arrows). `step` defaults to 1 and 0.001; `unit` is the suffix. |
+| `int`, `float` | `EditorSpinSlider`. The slider spans `ui_min`..`ui_max` (falling back to `min`..`max`); typed values may go beyond the slider and are clamped to `min`/`max`. Without a range there is no slider (an int gets up/down arrows). `step` defaults to 1 and 0.001. For a float it is the increment while dragging only: a typed value is kept to six decimals, not snapped to `step`. `unit` is the suffix. |
 | `enum` | `OptionButton` |
 | `string` | `LineEdit`, reported on every keystroke |
 | `text` | `TextEdit` |

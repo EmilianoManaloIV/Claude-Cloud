@@ -213,6 +213,9 @@ void TetraImageWorkspace::_set_document(const Ref<TetraImageDocument> &p_documen
 	if (filter_session) {
 		_drop_preview();
 		_end_filter();
+		// A commit that is still being computed belongs to the old document;
+		// its result is ignored, so nothing else would end the busy state.
+		_set_busy(false);
 	}
 	if (document.is_valid()) {
 		document->disconnect(SNAME("undo_changed"), callable_mp(this, &TetraImageWorkspace::_document_edited));
@@ -454,7 +457,7 @@ void TetraImageWorkspace::_notification(int p_what) {
 }
 
 Ref<TetraImageDocument> TetraImageWorkspace::new_document(int p_width, int p_height, const Color &p_fill) {
-	ERR_FAIL_COND_V(p_width < 1 || p_height < 1 || p_width > 16384 || p_height > 16384, Ref<TetraImageDocument>());
+	ERR_FAIL_COND_V(!TetraImageDocument::is_size_supported(p_width, p_height), Ref<TetraImageDocument>());
 	Ref<TetraImageDocument> created;
 	created.instantiate();
 	ERR_FAIL_COND_V(created->create(p_width, p_height, p_fill.srgb_to_linear()) != OK, Ref<TetraImageDocument>());

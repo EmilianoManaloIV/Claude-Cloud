@@ -3,6 +3,7 @@
 #include "../mlt/tetra_mlt_engine.h"
 #include "../tetra_video_assets.h"
 #include "../tetra_video_project.h"
+#include "../tetra_video_renderer.h"
 #include "tetra_video_bin.h"
 #include "tetra_video_effect_stack.h"
 #include "tetra_video_monitor.h"
@@ -654,6 +655,13 @@ Error TetraVideoWorkspace::open_project(const String &p_path) {
 		_set_status(vformat(TTR("Could not open %s: %s"), p_path.get_file(), loaded->get_last_error().is_empty() ? String(error_names[error]) : loaded->get_last_error()), true);
 		return error;
 	}
+	if (loaded->is_foreign()) {
+		// The file of another program is only read in part (clips and their filters). It is imported into a
+		// project without a file, so that neither Save nor the editor's own saving can write over it.
+		_set_project(loaded, String());
+		_set_status(vformat(TTR("Imported %s. Transitions and track effects of other programs are not kept; use Save As to keep this as a new project."), p_path.get_file()), true);
+		return OK;
+	}
 	const String local = ProjectSettings::get_singleton()->localize_path(p_path);
 	_set_project(loaded, local.begins_with("res://") ? local : p_path);
 	_set_status(vformat(TTR("Opened %s."), p_path.get_file()));
@@ -672,7 +680,7 @@ Error TetraVideoWorkspace::save_project(const String &p_path) {
 	}
 	const Error error = project->save(path);
 	if (error != OK) {
-		_show_error(vformat(TTR("Could not save %s: %s"), path, String(error_names[error])));
+		_show_error(vformat(TTR("Could not save %s: %s"), path, project->get_last_error().is_empty() ? String(error_names[error]) : project->get_last_error()));
 		return error;
 	}
 	project_path = path;
@@ -932,7 +940,12 @@ void TetraVideoWorkspace::open_render_dialog() {
 	if (render_path_source != project_path && !render_dialog->is_rendering()) {
 		// A saved project renders next to its file by default.
 		render_path_source = project_path;
-		render_dialog->set_output_path(project_path.is_empty() ? String("res://renders/video.mp4") : project_path.get_basename() + ".mp4");
+		String output = project_path.is_empty() ? String("res://renders/video.mp4") : project_path.get_basename() + ".mp4";
+		// Never propose one of the project's own source files, such as the clip the project was named after.
+		while (TetraVideoRenderer::is_project_source(project, output)) {
+			output = output.get_basename() + "-render.mp4";
+		}
+		render_dialog->set_output_path(output);
 	}
 	render_dialog->popup_render(project, timeline->get_zone_in(), timeline->get_zone_out());
 }
@@ -1161,6 +1174,7 @@ TetraVideoWorkspace::TetraVideoWorkspace() {
 	bin->set_v_size_flags(SIZE_EXPAND_FILL);
 	bin->connect("clip_activated", callable_mp(this, &TetraVideoWorkspace::_bin_clip_activated));
 	bin->connect("import_requested", callable_mp(this, &TetraVideoWorkspace::_bin_import_requested));
+	bin->connect("edit_refused", callable_mp(this, &TetraVideoWorkspace::_timeline_edit_refused));
 	bin_box->add_child(bin);
 
 	HSplitContainer *right_split = memnew(HSplitContainer);

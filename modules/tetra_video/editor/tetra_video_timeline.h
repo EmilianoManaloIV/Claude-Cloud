@@ -84,6 +84,7 @@ private:
 	bool snapping = true;
 	PackedInt32Array selection;
 	int active_track = -1;
+	int active_track_uid = 0;
 	int zone_in = -1;
 	int zone_out = -1;
 

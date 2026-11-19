@@ -71,6 +71,14 @@ func _test_modifier_metadata() -> void:
 	check(bridge_stack[0]["objects"]["object"]["mesh"] == b.mesh, "the object's mesh")
 	check(bridge_stack[0]["objects"]["object"]["transform"].is_equal_approx(Transform3D(Basis(), Vector3(0.5, 2, 0))), "the object's transform is relative to the modified node")
 	check_eq(bridge_stack[1], {"type": "BEVEL", "values": {}, "enabled": false}, "a plain entry has no objects")
+	# What to_bridge_stack() leaves out is named, so that a caller can refuse to evaluate without it.
+	check(TetraBlenderScene.find_object_problem(a, [boolean, disabled]).contains("Nowhere"), "a path that leads nowhere is a problem: " + TetraBlenderScene.find_object_problem(a, [boolean, disabled]))
+	boolean["object_paths"] = {"object": NodePath("../B")}
+	check_eq(TetraBlenderScene.find_object_problem(a, [boolean, disabled]), "", "a stack whose objects all resolve has none")
+	boolean["object_paths"] = {"object": NodePath(".")}
+	check(TetraBlenderScene.find_object_problem(a, [boolean]) != "", "the node itself is not an object for its own modifier")
+	disabled["object_paths"] = {"object": NodePath("../Nowhere")}
+	check_eq(TetraBlenderScene.find_object_problem(a, [disabled]), "", "a disabled modifier's objects do not matter")
 	parent.free()
 
 

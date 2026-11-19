@@ -35,6 +35,11 @@ String TetraImageEditorPlugin::get_unsaved_status(const String &p_for_scene) con
 		return String();
 	}
 	const String path = workspace->get_document_path();
+	if (!workspace->can_save_directly()) {
+		// "Save" in the editor's dialog calls save_external_data(), which cannot
+		// ask for a file name or a format, so the dialog would only come back.
+		return vformat(TTR("The image \"%s\" in the Image workspace has unsaved changes, and saving it needs a file name or a choice of format.\nCancel and save it in the Image workspace, or continue without saving it."), path.is_empty() ? TTR("[Untitled]") : path.get_file());
+	}
 	return vformat(TTR("The image \"%s\" in the Image workspace has unsaved changes. Save it before closing?"), path.is_empty() ? TTR("[Untitled]") : path.get_file());
 }
 

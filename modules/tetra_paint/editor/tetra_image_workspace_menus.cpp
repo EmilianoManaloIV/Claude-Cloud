@@ -579,7 +579,20 @@ void TetraImageWorkspace::_new_dialog_confirmed() {
 		default:
 			break;
 	}
-	new_document(int(new_width->get_value()), int(new_height->get_value()), fill);
+	const Size2i size(int(new_width->get_value()), int(new_height->get_value()));
+	if (!_check_size(size)) {
+		return;
+	}
+	new_document(size.x, size.y, fill);
+}
+
+bool TetraImageWorkspace::_check_size(const Size2i &p_size) {
+	if (TetraImageDocument::is_size_supported(p_size.x, p_size.y)) {
+		return true;
+	}
+	// Every layer is an untiled float buffer: 16 bytes per pixel, several times over while painting.
+	EditorNode::get_singleton()->show_warning(vformat(TTR("%d x %d pixels is too large for the Image workspace, which handles up to %d megapixels (for example %d x %d)."), p_size.x, p_size.y, TetraImageDocument::MAX_PIXELS / 1000000, 8192, 8192));
+	return false;
 }
 
 void TetraImageWorkspace::_popup_file_dialog(int p_purpose) {
@@ -688,6 +701,12 @@ void TetraImageWorkspace::_save_choice_action(const String &p_action) {
 
 void TetraImageWorkspace::_save_choice_confirmed() {
 	const String path = document_path.get_basename() + ".ora";
+	if (FileAccess::exists(path)) {
+		// Some other image may be in that file: the file dialog asks before it overwrites.
+		_status_message(vformat(TTR("\"%s\" already exists; choose where to save."), path.get_file()));
+		_popup_file_dialog(FILE_PURPOSE_SAVE_AS);
+		return;
+	}
 	const Error err = _write_file(path, true);
 	if (err != OK) {
 		EditorNode::get_singleton()->show_warning(vformat(TTR("Could not write \"%s\" (%s)."), path, error_names[err]));
@@ -709,10 +728,14 @@ Error TetraImageWorkspace::_write_file(const String &p_path, bool p_becomes_docu
 	}
 	if (p_becomes_document) {
 		document_path = p_path;
-		modified = false;
+		// A flat file of a layered image is an export: the layers exist only
+		// here, so the document still counts as unsaved.
+		if (can_save_directly()) {
+			modified = false;
+		}
 		_update_title();
 	}
-	_status_message(vformat(TTR("Saved \"%s\"."), p_path));
+	_status_message(vformat(modified && p_becomes_document ? TTR("Exported \"%s\"; the layers are not saved yet.") : TTR("Saved \"%s\"."), p_path));
 	_file_written(p_path);
 	return OK;
 }
@@ -842,6 +865,9 @@ void TetraImageWorkspace::_size_confirmed() {
 		return;
 	}
 	const Size2i size(int(size_width->get_value()), int(size_height->get_value()));
+	if (!_check_size(size)) {
+		return;
+	}
 	if (size_dialog_mode == SIZE_DIALOG_SCALE) {
 		document->scale_image(size, TetraImageDocument::Interpolation(size_interpolation->get_selected_id()));
 	} else {
@@ -920,6 +946,41 @@ void TetraImageWorkspace::_search_activated(const String &p_id) {
 	_open_operation(p_id, Dictionary(), false);
 }
 
+// The operation dialog edits colours with a colour picker, which shows and
+// returns display (sRGB) values, while the engines and everything the workspace
+// keeps (remembered values, the scripting surface) use linear ones.
+static Dictionary convert_colors(const Dictionary &p_values, bool p_to_linear) {
+	Dictionary converted = p_values.duplicate(true);
+	for (const KeyValue<Variant, Variant> &entry : p_values) {
+		if (entry.value.get_type() == Variant::COLOR) {
+			const Color color = entry.value;
+			converted[entry.key] = p_to_linear ? color.srgb_to_linear() : color.linear_to_srgb();
+		}
+	}
+	return converted;
+}
+
+static Dictionary colors_to_linear(const Dictionary &p_values) {
+	return convert_colors(p_values, true);
+}
+
+static Dictionary colors_to_display(const Dictionary &p_values) {
+	return convert_colors(p_values, false);
+}
+
+static Dictionary operation_for_display(const Dictionary &p_operation) {
+	Dictionary operation = p_operation.duplicate(true);
+	Array params = operation.get("params", Array());
+	for (int i = 0; i < params.size(); i++) {
+		Dictionary param = params[i];
+		if (param.get("type", String()) == "color" && param.get("default", Variant()).get_type() == Variant::COLOR) {
+			const Color linear = param["default"];
+			param["default"] = linear.linear_to_srgb();
+		}
+	}
+	return operation;
+}
+
 void TetraImageWorkspace::_open_operation(const String &p_id, const Dictionary &p_values, bool p_use_given_values) {
 	const Dictionary operation = _find_operation(p_id);
 	if (operation.is_empty()) {
@@ -938,8 +999,8 @@ void TetraImageWorkspace::_open_operation(const String &p_id, const Dictionary &
 		initial = remembered_values[p_id];
 	}
 	operation_dialog->set_preview_checked(true);
-	operation_dialog->popup_operation(operation, initial);
-	_request_filter(operation_dialog->get_values(), false);
+	operation_dialog->popup_operation(operation_for_display(operation), colors_to_display(TetraSchema::sanitize_values(operation, initial)));
+	_request_filter(colors_to_linear(operation_dialog->get_values()), false);
 }
 
 bool TetraImageWorkspace::_begin_filter(const String &p_id) {
@@ -1077,7 +1138,7 @@ void TetraImageWorkspace::_end_filter() {
 
 void TetraImageWorkspace::_dialog_values_changed(const Dictionary &p_values) {
 	if (filter_session && operation_dialog->is_preview_checked()) {
-		_request_filter(p_values, false);
+		_request_filter(colors_to_linear(p_values), false);
 	}
 }
 
@@ -1086,7 +1147,7 @@ void TetraImageWorkspace::_dialog_preview_toggled(bool p_checked) {
 		return;
 	}
 	if (p_checked) {
-		_request_filter(operation_dialog->get_values(), false);
+		_request_filter(colors_to_linear(operation_dialog->get_values()), false);
 	} else {
 		// Also outdates a preview that is still being computed.
 		filter_serial++;
@@ -1094,23 +1155,24 @@ void TetraImageWorkspace::_dialog_preview_toggled(bool p_checked) {
 	}
 }
 
-void TetraImageWorkspace::_dialog_confirmed(const String &p_id, const Dictionary &p_values) {
+void TetraImageWorkspace::_dialog_confirmed(const String &p_id, const Dictionary &p_dialog_values) {
 	if (!filter_session) {
 		return;
 	}
-	if (filter_preview_shown && !filter_task_running && filter_shown_values.recursive_equal(p_values, 0)) {
+	const Dictionary values = colors_to_linear(p_dialog_values);
+	if (filter_preview_shown && !filter_task_running && filter_shown_values.recursive_equal(values, 0)) {
 		// What is on screen is exactly what was asked for: keep it as one undo step.
 		filter_document->end_undo_group();
 		filter_preview_shown = false;
 		const String label = filter_label;
 		_end_filter();
-		_remember_filter(p_id, p_values);
+		_remember_filter(p_id, values);
 		_status_message(vformat(TTR("Applied %s."), label));
 		emit_signal(SNAME("operation_applied"), p_id);
 		_document_edited();
 		return;
 	}
-	_request_filter(p_values, true);
+	_request_filter(values, true);
 }
 
 void TetraImageWorkspace::_dialog_cancelled(const String &p_id) {

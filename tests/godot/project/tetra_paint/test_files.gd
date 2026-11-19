@@ -61,6 +61,7 @@ func build_document() -> TetraImageDocument:
 func run() -> void:
 	test_ora_round_trip()
 	test_ora_archive()
+	test_ora_failed_save()
 	test_foreign_ora()
 	test_ora_as_image()
 	test_load_raster()
@@ -121,6 +122,38 @@ func test_ora_round_trip() -> void:
 	broken.close()
 	check(loaded.load(tmp_dir().path_join("broken.ora")) != OK, "a broken file fails to load")
 	check_eq(loaded.get_layer_count(), 5, "a failed load keeps the document")
+
+
+func test_ora_failed_save() -> void:
+	# A save that fails half way must not destroy the file that was there.
+	var path := tmp_dir().path_join("keep.ora")
+	var small := TetraImageDocument.new()
+	small.create(8, 8, Color(1, 0, 0, 1))
+	check_eq(small.save_ora(path), OK, "the first save")
+	check(not FileAccess.file_exists(path + ".tmp"), "leaves no temporary file")
+	var good := FileAccess.get_file_as_bytes(path)
+	check(good.size() > 0, "and a file")
+	if OS.get_name() != "Linux":
+		return
+	# A second process saves a much larger image to the same file while its
+	# files may not grow beyond 32 KiB: every write after that fails, as on a
+	# full disk.
+	# (OS.execute hands the arguments to a shell inside double quotes, so the
+	# command uses single quotes and no variables.)
+	var command := "exec '%s' --headless --path '%s' --script res://tetra_paint/ora_save_child.gd -- '%s'" % [OS.get_executable_path(), ProjectSettings.globalize_path("res://"), path]
+	var output := []
+	OS.execute("bash", ["-c", "trap '' XFSZ; ulimit -f 32; " + command], output, true)
+	var text := "\n".join(output)
+	check(text.contains("save_ora=") and not text.contains("save_ora=0"), "a save that cannot write everything reports it: " + text.right(200))
+	check(FileAccess.get_file_as_bytes(path) == good, "and the earlier file is untouched")
+	check(not FileAccess.file_exists(path + ".tmp"), "with no temporary file left behind")
+	var reloaded := TetraImageDocument.new()
+	check_eq(reloaded.load(path), OK, "it still loads")
+	check_eq(reloaded.get_size(), Vector2i(8, 8), "as the earlier image")
+	# Without the limit the same save replaces the file.
+	OS.execute("bash", ["-c", command], output, true)
+	check_eq(reloaded.load(path), OK, "the same save without the limit works")
+	check_eq(reloaded.get_size(), Vector2i(256, 256), "and replaces the file")
 
 
 func test_ora_archive() -> void:

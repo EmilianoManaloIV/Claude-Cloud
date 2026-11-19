@@ -31,6 +31,8 @@ const int TEXT_MIN_HEIGHT = 84;
 
 // The step of a float parameter that does not give one; the same as the inspector's default.
 const double DEFAULT_FLOAT_STEP = 0.001;
+// What a typed float is rounded to. The schema's "step" is only the increment of a drag.
+const double FLOAT_TYPING_STEP = 0.000001;
 
 bool get_limit(const Dictionary &p_param, const char *p_key, double &r_limit) {
 	const Variant value = p_param.get(p_key, Variant());
@@ -336,7 +338,19 @@ EditorSpinSlider *TetraParamPanel::_create_spin(int p_row, int p_component) {
 	EditorSpinSlider *spin = memnew(EditorSpinSlider);
 	spin->set_h_size_flags(SIZE_EXPAND_FILL);
 	spin->set_editing_integer(integer);
-	spin->set_step(step);
+	if (integer) {
+		spin->set_step(step);
+	} else {
+		// A Range snaps every value to its step, so the hint is only the step while the slider or
+		// the number is dragged. A typed value keeps its digits: "step" does not snap values.
+		const double typing_step = MIN(step, FLOAT_TYPING_STEP);
+		const Callable set_step = callable_mp((Range *)spin, &Range::set_step);
+		spin->set_step(typing_step);
+		spin->connect("grabbed", set_step.bind(step));
+		spin->connect("ungrabbed", set_step.bind(typing_step));
+		// A click that starts typing is a grab that never ends with "ungrabbed".
+		spin->connect("value_focus_entered", set_step.bind(typing_step));
+	}
 	if (has_slider) {
 		spin->set_min(slider_min);
 		spin->set_max(slider_max);

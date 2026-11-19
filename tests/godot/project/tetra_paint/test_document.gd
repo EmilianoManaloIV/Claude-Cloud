@@ -35,6 +35,13 @@ func test_structure() -> void:
 	doc.changed.connect(func(p_rect: Rect2i) -> void: _changed_rects.append(p_rect))
 	check_eq(doc.create(8, 6, Color(1, 1, 1, 1)), OK, "create")
 	check_eq(doc.get_size(), Vector2i(8, 6), "size")
+	# The area is limited, not only the sides: a layer is 16 bytes per pixel.
+	check(TetraImageDocument.is_size_supported(8192, 8192) and TetraImageDocument.is_size_supported(16384, 4096), "sizes up to 8192 x 8192 pixels are supported")
+	check(not TetraImageDocument.is_size_supported(16384, 16384) and not TetraImageDocument.is_size_supported(8193, 8192), "larger areas are not")
+	check(not TetraImageDocument.is_size_supported(16385, 1) and not TetraImageDocument.is_size_supported(0, 8), "nor sides beyond 16384 or below 1")
+	check_eq(doc.scale_image(Vector2i(16384, 16384)), ERR_INVALID_PARAMETER, "scale_image refuses a 4 GiB layer")
+	check_eq(doc.resize_canvas(Vector2i(16384, 16384)), ERR_INVALID_PARAMETER, "and so does resize_canvas")
+	check_eq(doc.get_size(), Vector2i(8, 6), "the document is unchanged")
 	check_eq(doc.get_layer_count(), 1, "one layer after create")
 	check_eq(_changed_rects.back(), Rect2i(0, 0, 8, 6), "create reports the whole canvas")
 	check_eq(doc.get_and_clear_dirty_rect(), Rect2i(0, 0, 8, 6), "dirty rect after create")

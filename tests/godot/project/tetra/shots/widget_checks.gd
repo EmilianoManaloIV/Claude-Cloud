@@ -222,11 +222,22 @@ func _test_param_panel() -> void:
 	radius.value = 42.5
 	check_eq(changes, [["radius", 42.5]], "editing the control emits value_changed")
 	check_eq(panel.get_value("radius"), 42.5, "and stores the value")
+	# "step" is a drag increment: a typed value is not snapped to it.
+	radius.value = 0.1234
+	check_eq(changes[-1], ["radius", 0.1234], "a typed float is not snapped to the step")
+	var typing_step: float = radius.step
+	radius.emit_signal("grabbed")
+	check_near(radius.step, 0.1, 1e-9, "a drag moves in steps of the hint")
+	radius.emit_signal("ungrabbed")
+	check_near(radius.step, typing_step, 1e-12, "and typing is fine again after the drag")
+	radius.emit_signal("grabbed")
+	radius.emit_signal("value_focus_entered")
+	check_near(radius.step, typing_step, 1e-12, "a click that starts typing ends the drag step")
 	radius.value = 99999.0
 	check_eq(changes[-1], ["radius", 1500.0], "a typed value beyond the hard limit is clamped")
 	check_near(radius.value, 1500.0, 1e-6, "and the control shows the clamped value")
 	radius.value = 99999.0
-	check_eq(changes.size(), 2, "an edit that changes nothing emits nothing")
+	check_eq(changes.size(), 3, "an edit that changes nothing emits nothing")
 	var count: Range = spins[1]
 	count.value = 8
 	check_eq(changes[-1], ["count", 8], "an int parameter reports an int")

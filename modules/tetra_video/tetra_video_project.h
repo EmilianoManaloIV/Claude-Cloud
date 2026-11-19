@@ -58,6 +58,8 @@ private:
 		bool hidden = false;
 		bool muted = false;
 		bool locked = false;
+		// Identifies the track while this project object lives, whatever its index becomes. Not saved.
+		int uid = 0;
 	};
 
 	struct Clip {
@@ -112,10 +114,14 @@ private:
 	State group_before;
 	uint64_t revision = 0;
 	String last_error;
+	int next_track_uid = 1;
+	// Loaded from MLT XML of another program, which the model only keeps in part.
+	bool foreign = false;
 
 	static int _find_clip(const State &p_state, int p_id);
 	static int _find_bin(const State &p_state, int p_id);
 	static bool _bin_is_still(const BinClip &p_bin);
+	static void _rescale_frames(State &r_state, int64_t p_num, int64_t p_den);
 	static bool _layout_ok(const State &p_state);
 	static bool _track_accepts(const State &p_state, int p_track, const BinClip &p_bin);
 	static int _paired_track(const State &p_state, int p_track);
@@ -136,7 +142,7 @@ private:
 	Dictionary _bin_to_dictionary(const BinClip &p_bin) const;
 	Dictionary _clip_to_dictionary(const Clip &p_clip) const;
 
-	Error _load_xml(const String &p_xml, State &r_state, String &r_error) const;
+	Error _load_xml(const String &p_xml, State &r_state, String &r_error, bool &r_foreign) const;
 
 protected:
 	static void _bind_methods();
@@ -182,6 +188,8 @@ public:
 	bool is_track_muted(int p_index) const;
 	bool is_track_locked(int p_index) const;
 	int get_paired_track(int p_index) const;
+	int get_track_uid(int p_index) const;
+	int find_track_by_uid(int p_uid) const;
 
 	// Timeline clips.
 	int insert_clip(int p_bin_id, int p_track, int p_position, int p_in = -1, int p_out = -1, bool p_with_linked = true);
@@ -254,6 +262,7 @@ public:
 	Error save(const String &p_path);
 	Error load(const String &p_path);
 	Error load_from_xml(const String &p_xml);
+	bool is_foreign() const { return foreign; }
 	void clear();
 
 	// Converts a parameter value to the text MLT expects in a property.

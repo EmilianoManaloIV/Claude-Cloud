@@ -70,6 +70,8 @@ class TetraBlenderBridge : public RefCounted {
 	SafeFlag server_ready;
 	SafeFlag request_in_flight;
 	SafeFlag destroying;
+	// stop() is ending the process under a request in flight.
+	SafeFlag stop_requested;
 
 	bool has_response = false;
 	Dictionary response;
@@ -131,7 +133,7 @@ class TetraBlenderBridge : public RefCounted {
 	Dictionary _finalize(JobKind p_kind, const Dictionary &p_result, const Variant &p_context);
 	Dictionary _run_now(JobKind p_kind, const Dictionary &p_command, const PackedStringArray &p_temp_files, const Variant &p_context);
 	void _queue_job(JobKind p_kind, const Dictionary &p_command, const PackedStringArray &p_temp_files, const Variant &p_context, const Callable &p_done, double p_timeout = 0.0);
-	void _cancel_queued_jobs(const String &p_reason);
+	void _cancel_queued_jobs(bool p_report);
 	void _async_loop();
 	Array _list(const String &p_what);
 	void _list_async(const String &p_what, const Callable &p_done);

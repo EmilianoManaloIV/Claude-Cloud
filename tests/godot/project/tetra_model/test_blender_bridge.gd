@@ -531,6 +531,37 @@ func _test_lifetime() -> void:
 	check(not _process_exists(third_pid), "stop() ends a busy Blender")
 	check(await _until(func() -> bool: return not interrupted.is_empty()), "the interrupted job reports back")
 	check(not interrupted.is_empty() and interrupted[0].get("ok") == false, "as a failure: %s" % [interrupted])
+	check(not interrupted.is_empty() and interrupted[0].get("stopped") == true, "marked as stopped on purpose, not as a crash: %s" % [interrupted])
+
+	# stop() also ends the jobs that wait behind the one in flight, with the same mark.
+	var queued := []
+	_bridge.request_async(slow, func(result: Dictionary) -> void: queued.append(result))
+	_bridge.request_async({"cmd": "hello"}, func(result: Dictionary) -> void: queued.append(result))
+	check(await _until(func() -> bool: return _bridge.is_running() and _bridge.is_busy()), "a slow render with a job behind it")
+	_bridge.stop()
+	check(await _until(func() -> bool: return queued.size() == 2), "both jobs report back")
+	check(queued.all(func(result: Dictionary) -> bool: return result.get("ok") == false and result.get("stopped") == true), "as stopped: %s" % [queued])
+	var refused := _bridge.request({"cmd": "no_such_command"})
+	check(refused.get("ok") == false and not refused.has("stopped"), "an ordinary failure is not marked as stopped: %s" % refused)
+
+	# Exchange directories left by editors that crashed are removed once they are a day old.
+	var cache := _bridge.get_exchange_dir().get_base_dir()
+	var stale := cache.path_join("exchange-999999999-1")
+	var recent := cache.path_join("exchange-999999999-2")
+	for dir: String in [stale, recent]:
+		DirAccess.make_dir_recursive_absolute(dir.path_join("import"))
+		FileAccess.open(dir.path_join("import/left.tmsh"), FileAccess.WRITE).store_string("x")
+	if OS.execute("touch", ["-d", "3 days ago", stale]) == 0:
+		var other := TetraBlenderBridge.new()
+		other.get_exchange_dir()
+		check(not DirAccess.dir_exists_absolute(stale), "a new bridge removes an abandoned exchange directory")
+		check(DirAccess.dir_exists_absolute(recent), "but not one that was used within the last day")
+		check(DirAccess.dir_exists_absolute(_bridge.get_exchange_dir()), "nor that of a living bridge")
+		other = null
+	for dir: String in [stale, recent]:
+		DirAccess.remove_absolute(dir.path_join("import/left.tmsh"))
+		DirAccess.remove_absolute(dir.path_join("import"))
+		DirAccess.remove_absolute(dir)
 
 	# Dropping the last reference ends Blender and removes the exchange directory.
 	check(_bridge.request({"cmd": "hello"}).get("ok") == true, "restarted once more")

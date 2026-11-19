@@ -66,7 +66,10 @@ get_width() get_height() get_fps_num() get_fps_den() get_fps() -> float get_samp
 
 Presets: `atsc_1080p_{24,2398,25,2997,30,50,5994,60}`, `atsc_720p_{25,30,50,60}`,
 `uhd_2160p_{25,30,50,60}`, `vertical_hd_{30,60}`, `square_1080p_{30,60}`.
-Changing the frame rate does not rescale clip positions.
+Frames are counted at the project's frame rate, so changing the rate converts
+every frame number (bin lengths, positions, in/out points, fades, markers) and
+the timeline keeps its times; clips never overlap or leave their media through
+the rounding. Effect keyframes are not converted.
 
 ### Bin
 
@@ -98,7 +101,12 @@ set_track_name(index, name) / set_track_hidden(index, bool) / set_track_muted(in
 get_track_count() -> int     get_track(index) -> { kind, name, hidden, muted, locked }
 get_track_kind(index) get_track_name(index) is_track_hidden(index) is_track_muted(index) is_track_locked(index)
 get_paired_track(index) -> int      # Kdenlive's mirror track: n-th video from the bottom <-> n-th audio from the top; -1 if none
+get_track_uid(index) -> int   find_track_by_uid(uid) -> int      # 0 / -1 when there is none
 ```
+
+Track indices change when tracks are added, removed or moved. A track's uid
+stays with it for the life of the project object, across undo and redo, and is
+never reused; it is not saved, and a loaded document's tracks get new uids.
 
 A video track only takes clips with video, an audio track only clips with
 audio. As in Kdenlive, video tracks never play sound and audio tracks never
@@ -192,6 +200,7 @@ clear_undo_history()   set_max_undo_steps(n) (default 200)   get_max_undo_steps(
 ```
 to_mlt_xml(options = {}) -> String
 save(path) -> Error      load(path) -> Error      load_from_xml(xml) -> Error      clear()
+is_foreign() -> bool     # loaded from another program's MLT XML; false again after save()
 static value_to_mlt(value) -> String
 ```
 
@@ -208,7 +217,12 @@ above it) and `volume` filters with MLT animation strings.
 Options: `compositing` (default: first available of `frei0r.cairoblend`,
 `qtblend`, `composite`), `image_producer` (`pixbuf`, `qimage`),
 `text_producer` (`pango`, `qtext`), `width`/`height` (override the profile
-size, used for scaled renders), `tetra_properties` (default true).
+size; effect values stay in project pixels, so scaled renders leave the profile
+alone and scale in the consumer instead), `tetra_properties` (default true).
+
+`save` writes `<path>.tmp` and renames it over `path` only when all of it is on
+disk; otherwise it returns `ERR_FILE_CANT_WRITE` (or the open error) with a
+message and the previous file is kept.
 
 The project file (`.mlt`) is this XML. `tetra:*` properties, which MLT
 ignores, carry what is needed to reload the exact model: ids, bin, links,
@@ -338,6 +352,7 @@ Parameter mapping (Kdenlive type → schema type, kept in `kdenlive_type`):
 static get_presets() -> Array of { id, group, name, extension, args, type, builtin, default_quality?, default_bitrate?,
                                    default_audio_bitrate?, default_audio_quality?, speeds, default_speed_index }
 static get_preset(id) -> Dictionary        static find_melt() -> String
+static is_project_source(project, path) -> bool      # the path is a file one of the bin clips plays
 static expand_preset_arguments(preset, options) -> PackedStringArray
 
 start(project, output_path, preset_id, options = {}) -> Error
@@ -352,14 +367,17 @@ every profile of Kdenlive's `profiles.xml` as `<group id>/<name>`
 (`generic/MP4-H264/AAC`, ...).
 
 Options: `in`, `out` (frames, inclusive; default the whole timeline),
-`width` + `height` (scaled render), `quality` (or `crf`), `bitrate`,
+`width` + `height` (scaled render: the consumer scales, the profile and with
+it the pixel values of effects stay at project size), `quality` (or `crf`), `bitrate`,
 `audio_bitrate` (kbit/s), `audio_quality`, `speed_index`, `threads`,
 `extra_args` (more `name=value` consumer properties).
 
 `start` writes the project's XML to a scratch file and runs
 `melt <xml> in=.. out=.. -progress -consumer avformat:<output> <args> real_time=-N`.
 It returns `ERR_DOES_NOT_EXIST` (unknown preset), `ERR_FILE_NOT_FOUND` (no
-melt), `ERR_INVALID_DATA` (empty timeline), `ERR_BUSY` (already running).
+melt), `ERR_INVALID_DATA` (empty timeline), `ERR_BUSY` (already running),
+`ERR_FILE_ALREADY_IN_USE` (the output is one of the project's source files).
+An existing output file is replaced without asking; the render dialog asks.
 `finished(true, <output path>)` or `finished(false, <reason>)` arrives on the
 main thread; a cancelled render removes its partial file. Keep a reference to
 the renderer while it runs: dropping it cancels the render. After rendering
@@ -492,6 +510,8 @@ TetraVideoWorkspace (VBoxContainer)
   get_bin() get_monitor() get_timeline() get_effects_browser() get_effect_stack() get_render_dialog()
   new_project()   open_project(path) -> Error   save_project(path = "") -> Error
   request_open_project(path)              # like the menu: asks about unsaved changes first
+                                          # a file of another program (is_foreign) is imported: the project gets no
+                                          # path, so Save asks for a new file and the original is never written over
   get_project_path() -> String            is_modified() -> bool
   import_file(path) -> int                # bin id (existing one when already listed), -1 if unreadable
   import_and_show(path) -> int            # import_file + preview in the Clip Monitor
@@ -548,6 +568,7 @@ The UI is verified inside the running editor by screenshot drivers in
 
 ```sh
 scripts/screenshot.sh build/screens/video-checks.png  Video res://tetra_video/shots/checks.gd          # prints "N checks, M failed"
+scripts/screenshot.sh build/screens/video-safety.png  Video res://tetra_video/shots/safety_checks.gd   # prints "N checks, M failed"
 scripts/screenshot.sh build/screens/video-editing.png Video res://tetra_video/shots/editing.gd
 scripts/screenshot.sh build/screens/video-render.png  Video res://tetra_video/shots/render_dialog.gd
 scripts/screenshot.sh build/screens/video-effects.png Video res://tetra_video/shots/effects_browser.gd
@@ -556,6 +577,10 @@ scripts/screenshot.sh build/screens/video-effects.png Video res://tetra_video/sh
 `checks.gd` drives the workspace with real mouse and key events (selection,
 moves, snapping, trims, razor, drag from the bin, shortcuts and their scope,
 effects, menus, project files, a render and a cancelled render).
+`safety_checks.gd` covers the guards: the active track following its track,
+playback stopping when the timeline is emptied, refused bin deletions being
+reported, foreign MLT files never being saved over, and the render target
+never being a source clip.
 
 ## Tests
 
@@ -564,6 +589,8 @@ clips, undo exactness over random operation sequences), `test_xml_engine.gd`
 (XML, project file round trip, foreign and malformed files, frames from the
 engine, effects, fades, stills, titles, thumbnails, `melt` accepting the
 file), `test_playback.gd` (real-time playback, reverse, loop, sound),
-`test_assets.gd` (catalog and value conversion) and `test_render.gd` (presets
-and renders checked with `ffprobe`). Frames they render are saved as
+`test_assets.gd` (catalog and value conversion), `test_render.gd` (presets
+and renders checked with `ffprobe`) and `test_safety.gd` (failed saves keep
+the file, frame-rate changes, track uids, scaled renders of pixel-valued
+effects, renders onto source files). Frames they render are saved as
 `build/screens/video-*.png`.

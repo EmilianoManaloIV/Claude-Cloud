@@ -3,6 +3,7 @@
 #include "tetra_ora_loader.h"
 #include "tetra_paint_utils.h"
 
+#include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 #include "core/io/xml_parser.h"
 #include "core/io/zip_io.h"
@@ -10,6 +11,7 @@
 #include "core/os/os.h"
 
 #include <cstring>
+#include <type_traits>
 
 // Reads one member of an open zip archive. Returns false if it is missing.
 static bool zip_read_member(unzFile p_zip, const String &p_name, Vector<uint8_t> &r_data) {
@@ -24,6 +26,25 @@ static bool zip_read_member(unzFile p_zip, const String &p_name, Vector<uint8_t>
 	const int read = info.uncompressed_size == 0 ? 0 : unzReadCurrentFile(p_zip, r_data.ptrw(), r_data.size());
 	unzCloseCurrentFile(p_zip);
 	return read == int(info.uncompressed_size);
+}
+
+// zipio_write() reports every write as complete; this one notices a failed
+// write (a full disk, a lost network share) and how long the file should be.
+struct OraWriter {
+	Ref<FileAccess> file; // First: the other zipio functions take a Ref<FileAccess> *.
+	bool failed = false;
+	uint64_t end = 0;
+};
+static_assert(std::is_standard_layout_v<OraWriter>);
+
+static uLong ora_writer_write(voidpf p_opaque, voidpf p_stream, const void *p_buffer, uLong p_size) {
+	OraWriter *writer = reinterpret_cast<OraWriter *>(p_opaque);
+	if (writer->file.is_null() || !writer->file->store_buffer((const uint8_t *)p_buffer, p_size)) {
+		writer->failed = true;
+		return 0;
+	}
+	writer->end = MAX(writer->end, writer->file->get_position());
+	return p_size;
 }
 
 static bool zip_write_member(zipFile p_zip, const String &p_name, const Vector<uint8_t> &p_data, bool p_compress) {
@@ -124,7 +145,7 @@ Error TetraImageDocument::_load_ora(const String &p_path) {
 	int new_width = 0, new_height = 0;
 	LocalVector<OraLayer> entries;
 	Error err = zip_read_member(zip, "stack.xml", xml) ? parse_ora_stack(xml, new_width, new_height, entries) : ERR_FILE_CORRUPT;
-	if (err == OK && (new_width > 16384 || new_height > 16384)) {
+	if (err == OK && !is_size_supported(new_width, new_height)) {
 		err = ERR_FILE_CORRUPT;
 	}
 
@@ -191,6 +212,7 @@ Error TetraImageDocument::load(const String &p_path) {
 		if (err != OK) {
 			return err;
 		}
+		ERR_FAIL_COND_V_MSG(!is_size_supported(image->get_width(), image->get_height()), ERR_OUT_OF_MEMORY, vformat("\"%s\" is larger than the %d megapixels a document can hold.", p_path, MAX_PIXELS / 1000000));
 		const Vector<float> pixels = _image_to_linear(image);
 		ERR_FAIL_COND_V(pixels.is_empty(), ERR_FILE_CORRUPT);
 		_reset(image->get_width(), image->get_height());
@@ -226,10 +248,14 @@ static Vector<uint8_t> encode_png(const float *p_pixels, int p_stride_width, con
 
 Error TetraImageDocument::save_ora(const String &p_path) const {
 	ERR_FAIL_COND_V(width == 0, ERR_UNCONFIGURED);
-	Ref<FileAccess> file;
-	zlib_filefunc_def io = zipio_create_io(&file);
-	zipFile zip = zipOpen2(p_path.utf8().get_data(), APPEND_STATUS_CREATE, nullptr, &io);
-	ERR_FAIL_NULL_V_MSG(zip, ERR_FILE_CANT_WRITE, vformat("Cannot create \"%s\".", p_path));
+	// The archive is written beside the destination and only takes its place
+	// once it is complete, so a failed save leaves the previous file intact.
+	const String temporary_path = p_path + ".tmp";
+	OraWriter writer;
+	zlib_filefunc_def io = zipio_create_io(&writer.file);
+	io.zwrite_file = ora_writer_write;
+	zipFile zip = zipOpen2(temporary_path.utf8().get_data(), APPEND_STATUS_CREATE, nullptr, &io);
+	ERR_FAIL_NULL_V_MSG(zip, ERR_FILE_CANT_WRITE, vformat("Cannot create \"%s\".", temporary_path));
 
 	// The OpenRaster specification wants "mimetype" first and uncompressed.
 	bool ok = zip_write_member(zip, "mimetype", String("image/openraster").to_utf8_buffer(), false);
@@ -273,7 +299,17 @@ Error TetraImageDocument::save_ora(const String &p_path) const {
 	ok = ok && zip_write_member(zip, "Thumbnails/thumbnail.png", thumbnail->save_png_to_buffer(), false);
 
 	ok = zipClose(zip, nullptr) == ZIP_OK && ok;
-	return ok ? OK : ERR_FILE_CANT_WRITE;
+	// The last buffered bytes are only written when the file closes, so the
+	// size on disk is what tells whether everything arrived.
+	ok = ok && !writer.failed && uint64_t(FileAccess::get_size(temporary_path)) == writer.end;
+	Ref<DirAccess> directory = DirAccess::create_for_path(p_path);
+	if (ok && directory.is_valid() && directory->rename(temporary_path, p_path) == OK) {
+		return OK;
+	}
+	if (directory.is_valid()) {
+		directory->remove(temporary_path);
+	}
+	return ERR_FILE_CANT_WRITE;
 }
 
 Error TetraImageDocument::export_image(const String &p_path, float p_quality) const {

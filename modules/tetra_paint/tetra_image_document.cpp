@@ -73,7 +73,7 @@ int TetraImageDocument::_append_layer(const String &p_name, const Vector<float> 
 
 Error TetraImageDocument::create(int p_width, int p_height, const Color &p_fill) {
 	TETRA_REQUIRE_IDLE_V(ERR_BUSY);
-	ERR_FAIL_COND_V(p_width < 1 || p_height < 1 || p_width > 16384 || p_height > 16384, ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(!is_size_supported(p_width, p_height), ERR_INVALID_PARAMETER);
 	_reset(p_width, p_height);
 	const float fill[4] = { p_fill.r, p_fill.g, p_fill.b, p_fill.a };
 	active_layer = _append_layer(TTR("Background"), _new_buffer(p_fill.a > 0.0f ? fill : nullptr));
@@ -862,6 +862,7 @@ void TetraImageDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("layer_get_image", "id"), &TetraImageDocument::layer_get_image);
 	ClassDB::bind_method(D_METHOD("layer_set_image", "id", "image", "offset"), &TetraImageDocument::layer_set_image, DEFVAL(Vector2i()));
 
+	ClassDB::bind_static_method("TetraImageDocument", D_METHOD("is_size_supported", "width", "height"), &TetraImageDocument::is_size_supported);
 	ClassDB::bind_static_method("TetraImageDocument", D_METHOD("get_layer_mode_names"), &TetraImageDocument::get_layer_mode_names);
 	ClassDB::bind_static_method("TetraImageDocument", D_METHOD("blend_colors", "mode", "backdrop", "layer", "opacity"), &TetraImageDocument::blend_colors, DEFVAL(1.0f));
 

@@ -25,7 +25,10 @@ Gaussian blur), `gegl/tetra_gegl.cpp`.
 - **Pixels** are 32-bit float RGBA, **linear light, straight alpha**, one
   buffer of the canvas size per layer. Values are not clamped. Fine up to about
   4096 x 4096 (256 MB per layer there); there is no tiling and layers have no
-  offset or size of their own.
+  offset or size of their own. `create`, `scale_image`, `resize_canvas` and
+  `load` refuse sizes for which `is_size_supported(width, height)` (static)
+  is false: a side above 16384 or more than 8192 x 8192 pixels in all (1 GiB
+  per layer). The New Image and size dialogs show a warning instead.
 - **Every `Color` in the API is linear.** Convert UI colours with
   `Color.srgb_to_linear()`.
 - **Images going in** (`layer_set_image`, `load`, `filter_image`,
@@ -286,7 +289,7 @@ hue-saturation has the master range only.
 
 ```
 load(path) -> Error            # .ora with all layers, or any image Godot loads as one layer named after the file
-save_ora(path) -> Error        # OpenRaster
+save_ora(path) -> Error        # OpenRaster; written to "<path>.tmp" and renamed, so a failed save keeps the old file
 export_image(path, quality = 0.9) -> Error   # flattened; by extension: png, jpg/jpeg (on white), webp (lossless at quality 1), exr (linear float)
 ```
 
@@ -467,15 +470,24 @@ selection; to commit it through the selection use `apply_operation` instead.
   (a newer request replaces a waiting one) and shown on the canvas as a real
   edit inside an open undo group; OK keeps it as one undo step, Cancel takes
   it back and leaves the history untouched. Operations without parameters are
-  applied at once. The dialog reopens with the values used last.
+  applied at once. The dialog reopens with the values used last. Its colour
+  pickers show display (sRGB) colours; the workspace converts them to the
+  linear colours the engines take, and back for defaults and remembered
+  values.
 - **Saving**: Save writes to the file the image came from. `.ora` keeps the
   layers; png, jpg, jpeg, webp and exr are written flattened. When such a
   file has more than one layer, Save asks whether to "Export Flattened" to it
-  or to "Save as .ora" beside it. Files inside the project are passed to
+  or to "Save as .ora" beside it. After Export Flattened the image still
+  counts as unsaved, because its layers are in no file; when the `.ora`
+  beside it already exists, Save as .ora opens the file dialog instead of
+  overwriting it. Files inside the project are passed to
   `EditorFileSystem` (`update_file`, and a re-import when the file is already
   imported), so textures in open scenes show the new pixels. Unsaved changes
   mark the title with `(*)`; New, Open, Close and opening another file ask
-  first, and quitting the editor lists the image among the unsaved work.
+  first, and quitting the editor lists the image among the unsaved work
+  (the editor's "Save" button there can only save an image that needs no
+  file name or format choice; otherwise the message says to save it in the
+  workspace).
 
 All keys can be changed in the editor's shortcut settings (`tetra_image/*`).
 They act only while the workspace is shown and the keyboard focus is inside
@@ -492,6 +504,7 @@ open_file(path) -> Error                 # does not ask
 request_open_file(path)                  # asks first when there are unsaved changes
 save() -> Error                          # to get_document_path(): .ora with layers, otherwise flattened
 save_as(path) -> Error                   # .ora, png, jpg, jpeg, webp, exr; becomes the document's file
+#   a flat file of an image with several layers leaves is_modified() true: the layers are not in it
 export_as(path) -> Error                 # flattened copy; the document keeps its file
 close_document()
 get_document() -> TetraImageDocument, has_document(), get_document_path(), is_modified(), can_save_directly()
@@ -507,7 +520,7 @@ swap_colors(), reset_colors()
 
 get_operations() -> Array, are_operations_loaded() -> bool    # listed on a worker thread when the workspace is first shown
 apply_operation(id, values = {}) -> Error       # at once on the active layer, one undo step
-show_operation_dialog(id, values = {})          # dialog with live preview; without parameters applies in the background
+show_operation_dialog(id, values = {})          # dialog with live preview; without parameters applies in the background (colour values, as everywhere in the API, are linear)
 repeat_last_operation()
 is_filter_running() -> bool, is_preview_shown() -> bool
 
@@ -591,7 +604,8 @@ It covers the welcome page, the tiled canvas (one tile uploaded for a stroke
 inside one tile, painting speed on 2048 x 2048, real mouse events), every
 tool and its key, the focus rules of the keys, the layers panel, the menus
 and their dialogs, the filter preview (supersede, cancel, commit, repeat,
-search) and opening, saving and re-importing a project file. The other
+search, colours picked in a filter dialog, replacing the image while a filter
+is being applied) and opening, saving and re-importing a project file. The other
 drivers in `tests/godot/project/tetra_paint/shots/` make pictures:
 
 ```sh

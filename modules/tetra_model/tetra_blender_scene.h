@@ -50,6 +50,8 @@ public:
 	// the other MeshInstance3D's mesh and relative transform; a path that
 	// leads nowhere is left out.
 	static Array to_bridge_stack(MeshInstance3D *p_node, const Array &p_stack);
+	// Why to_bridge_stack() would leave out an object of an enabled modifier; empty if it would not.
+	static String find_object_problem(MeshInstance3D *p_node, const Array &p_stack);
 
 	// {base_color, metallic, roughness, emission, emission_strength}; a
 	// material that is not a BaseMaterial3D (or none) is described like

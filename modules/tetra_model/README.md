@@ -65,6 +65,7 @@ static is_available() -> bool
 
 start() -> Error                               # blocking; OK, ERR_FILE_NOT_FOUND (no launcher), ERR_CANT_CONNECT, ERR_TIMEOUT, ...
 stop()                                         # ends Blender, cancels queued jobs; the next request starts it again
+                                               # the jobs it ends answer {ok: false, stopped: true, error}
 is_running() -> bool
 is_busy() -> bool                              # a request is in flight or jobs are queued
 get_launch_description() -> String             # e.g. "bpy module of /…/python (environment variable TETRA_BLENDER_PYTHON)"
@@ -469,3 +470,24 @@ honest when Blender is updated.
   with a mesh. Vertex colours, vertex groups, shape keys and textures do not.
 - `run_operators` writes back the object it loaded; operators that create
   other objects are not listed.
+
+## Recovery and stale results
+
+- A job ended by `stop()` (a cancelled render, "Restart Blender") carries
+  `stopped: true`. The workspace does not treat it as a failed start: a
+  cancelled render reports "The render was cancelled.", and a modifier
+  evaluation or schema list that waited behind it is sent again.
+- After a failed start the workspace retries the failed schema lists and
+  evaluations when the editor settings name another launcher, or through
+  "Restart Blender", which stays enabled while a start error is shown.
+- `apply_modifiers()` (Apply All) refuses a stack whose last evaluation failed.
+- An object parameter of a modifier is watched (twice a second) for the stacks
+  evaluated in this editor session: when the object moves or gets another
+  mesh, the stack is evaluated again. A path that no longer leads to another
+  MeshInstance3D with a mesh is an evaluation error
+  (`TetraBlenderScene.find_object_problem(node, stack) -> String`). Stacks of a
+  freshly opened scene are not watched until they are evaluated once, and a
+  mesh resource edited in place is not noticed.
+- Exchange directories (`exchange-<pid>-<id>` in the cache) that have not
+  changed for a day are removed when a bridge creates its own: they belong to
+  editors that did not exit normally.

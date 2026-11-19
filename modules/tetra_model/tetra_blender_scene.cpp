@@ -115,6 +115,34 @@ Array TetraBlenderScene::to_bridge_stack(MeshInstance3D *p_node, const Array &p_
 	return stack;
 }
 
+String TetraBlenderScene::find_object_problem(MeshInstance3D *p_node, const Array &p_stack) {
+	if (!p_node || !p_node->is_inside_tree()) {
+		return String();
+	}
+	for (int i = 0; i < p_stack.size(); i++) {
+		if (p_stack[i].get_type() != Variant::DICTIONARY) {
+			continue;
+		}
+		const Dictionary source = p_stack[i];
+		if (!bool(source.get("enabled", true))) {
+			continue;
+		}
+		const String label = source.get("label", source.get("type", String()));
+		const Dictionary object_paths = source.get("object_paths", Dictionary());
+		for (const KeyValue<Variant, Variant> &kv : object_paths) {
+			Node *found = p_node->get_node_or_null(kv.value);
+			MeshInstance3D *other = Object::cast_to<MeshInstance3D>(found);
+			if (!found) {
+				return vformat("%s: the %s \"%s\" is no longer in the scene. Choose it again.", label, String(kv.key), String(kv.value));
+			}
+			if (!other || other == p_node || other->get_mesh().is_null()) {
+				return vformat("%s: the %s \"%s\" is not another MeshInstance3D with a mesh.", label, String(kv.key), String(kv.value));
+			}
+		}
+	}
+	return String();
+}
+
 Dictionary TetraBlenderScene::material_to_dictionary(const Ref<Material> &p_material) {
 	Dictionary description;
 	const Ref<BaseMaterial3D> material = p_material;
@@ -326,6 +354,7 @@ void TetraBlenderScene::_bind_methods() {
 	ClassDB::bind_static_method("TetraBlenderScene", D_METHOD("set_modifier_stack", "node", "source", "stack"), &TetraBlenderScene::set_modifier_stack);
 	ClassDB::bind_static_method("TetraBlenderScene", D_METHOD("make_modifier", "type", "values", "label"), &TetraBlenderScene::make_modifier, DEFVAL(Dictionary()), DEFVAL(String()));
 	ClassDB::bind_static_method("TetraBlenderScene", D_METHOD("to_bridge_stack", "node", "stack"), &TetraBlenderScene::to_bridge_stack);
+	ClassDB::bind_static_method("TetraBlenderScene", D_METHOD("find_object_problem", "node", "stack"), &TetraBlenderScene::find_object_problem);
 	ClassDB::bind_static_method("TetraBlenderScene", D_METHOD("material_to_dictionary", "material"), &TetraBlenderScene::material_to_dictionary);
 	ClassDB::bind_static_method("TetraBlenderScene", D_METHOD("light_to_dictionary", "light"), &TetraBlenderScene::light_to_dictionary);
 	ClassDB::bind_static_method("TetraBlenderScene", D_METHOD("environment_to_world", "environment"), &TetraBlenderScene::environment_to_world);

@@ -36,13 +36,14 @@ func drive(p_tree: SceneTree) -> void:
 	check(_blender.get_dock() != null and _blender.get_dock().is_inside_tree(), "the dock is in the editor")
 	check(_blender.get_bridge() == TetraBlenderBridge.get_shared(), "the plugin uses the shared bridge")
 
-	_check_status_without_blender()
+	await _check_status_without_blender()
 	var cube := await _check_add_primitive()
 	if cube != null:
 		await _check_modifiers(cube)
 		await _check_operators(cube)
 		await _check_import(cube)
 		await _check_render()
+		await _check_recovery_from_failed_start()
 	print("screenshot blender checks: %d checks, %d failed" % [_checks, _failures])
 
 
@@ -82,9 +83,55 @@ func _check_status_without_blender() -> void:
 		check_eq(_blender.get_status_text(), "Blender not found", "status text without a launcher")
 		for needle in ["tetra/blender/python_path", "tetra/blender/executable_path", "scripts/setup-blender-bridge.sh"]:
 			check(_blender.get_status_hint().contains(needle), "the hint names " + needle)
+		# A list that could not be loaded is asked for again when the settings name a Blender.
+		_blender.show_tab("operators")
+		check(await ShotScene.wait_until(_tree, func() -> bool: return _blender.get_schema_state(TetraBlenderEditorPlugin.SCHEMA_OPERATORS) == TetraBlenderEditorPlugin.SCHEMA_FAILED, 20.0), "without a launcher the operator list fails")
+		check_eq(_blender.get_status(), TetraBlenderEditorPlugin.STATUS_FAILED, "a request without a launcher fails the start")
+		OS.set_environment("TETRA_BLENDER_PYTHON", python)
+		EditorInterface.get_editor_settings().settings_changed.emit()
+		check(_blender.get_status() != TetraBlenderEditorPlugin.STATUS_FAILED, "the stale start error is gone once a launcher is configured: '%s'" % _blender.get_status_hint())
+		check(await ShotScene.wait_until(_tree, func() -> bool: return _blender.get_schema_state(TetraBlenderEditorPlugin.SCHEMA_OPERATORS) == TetraBlenderEditorPlugin.SCHEMA_LOADED, 120.0), "and the failed list is loaded without another gesture")
 	OS.set_environment("TETRA_BLENDER_PYTHON", python)
 	_blender.restart_bridge()
 	check_eq(_blender.get_status(), TetraBlenderEditorPlugin.STATUS_NOT_STARTED, "status with the launcher back")
+
+
+## What failed because Blender could not be started is tried again when the
+## settings name another Blender, and nothing is baked meanwhile.
+func _check_recovery_from_failed_start() -> void:
+	var p_python := OS.get_environment("TETRA_BLENDER_PYTHON")
+	OS.unset_environment("TETRA_BLENDER_PYTHON")
+	if TetraBlenderBridge.is_available():
+		OS.set_environment("TETRA_BLENDER_PYTHON", p_python)
+		return
+	_blender.restart_bridge()
+	var node := MeshInstance3D.new()
+	node.name = "NoBlender"
+	node.mesh = BoxMesh.new()
+	var scene_root := EditorInterface.get_edited_scene_root()
+	scene_root.add_child(node)
+	node.owner = scene_root
+	var source := node.mesh
+
+	_blender.add_modifier(node, "SUBSURF", {"levels": 1})
+	await _evaluated(node)
+	check_eq(_blender.get_status(), TetraBlenderEditorPlugin.STATUS_FAILED, "an evaluation without a launcher fails the start")
+	check(_blender.get_evaluation_info(node).get("error") != "", "the evaluation reports why")
+	check(not _blender.apply_modifiers(node), "Apply All refuses a stack whose evaluation failed")
+	check_eq(_blender.get_modifier_stack(node).size(), 1, "and keeps the stack")
+	check(node.mesh == source, "and the mesh")
+
+	# The user points the editor at a Blender: any settings change notices.
+	OS.set_environment("TETRA_BLENDER_PYTHON", p_python)
+	EditorInterface.get_editor_settings().settings_changed.emit()
+	check(_blender.get_status() != TetraBlenderEditorPlugin.STATUS_FAILED, "the stale start error is gone once a launcher is configured: '%s'" % _blender.get_status_hint())
+	await _evaluated(node)
+	check_eq(_blender.get_evaluation_info(node).get("error"), "", "the failed evaluation is sent again")
+	check(node.mesh != source, "and its result shown")
+	check(_blender.apply_modifiers(node), "which Apply All then bakes")
+	_history(node).undo()
+	_history(node).undo()
+	node.free()
 
 
 func _check_add_primitive() -> MeshInstance3D:
@@ -211,6 +258,36 @@ func _check_modifiers(p_cube: MeshInstance3D) -> void:
 	history.undo()
 	await _evaluated(p_cube)
 	check_eq(_blender.get_evaluation_info(p_cube).get("error"), "", "the error is gone with the modifier")
+
+	# An object parameter follows the object: moving the cutter evaluates the stack again.
+	var cutter := MeshInstance3D.new()
+	cutter.name = "Cutter"
+	cutter.mesh = BoxMesh.new()
+	p_cube.get_parent().add_child(cutter)
+	cutter.owner = p_cube.owner
+	cutter.position = Vector3(50, 0, 0)
+	var boolean := _blender.add_modifier(p_cube, "BOOLEAN", {"operation": "DIFFERENCE"})
+	_blender.set_modifier_object(p_cube, boolean, "object", p_cube.get_path_to(cutter))
+	await _evaluated(p_cube)
+	var apart := p_cube.mesh
+	check_eq(_blender.get_evaluation_info(p_cube).get("error"), "", "a Boolean with a far cutter evaluates")
+	cutter.position = Vector3(0.9, 0.9, 0.9)
+	check(await ShotScene.wait_until(_tree, func() -> bool: return p_cube.mesh != apart and not _blender.is_evaluating(p_cube), 60.0), "moving the cutter evaluates the stack again")
+	var cut := p_cube.mesh
+	check(_triangles(cut) != _triangles(apart), "with a different cut: %d and %d triangles" % [_triangles(cut), _triangles(apart)])
+	# A cutter that is gone is an error, not a silently uncut mesh.
+	cutter.name = "Renamed"
+	check(await ShotScene.wait_until(_tree, func() -> bool: return str(_blender.get_evaluation_info(p_cube).get("error")).contains("Cutter"), 10.0), "a path that leads nowhere is an evaluation error: '%s'" % _blender.get_evaluation_info(p_cube).get("error"))
+	check(p_cube.mesh == cut and not _blender.apply_modifiers(p_cube), "which Apply All does not bake")
+	var apply_buttons := tab.find_children("*", "Button", true, false).filter(func(button: Button) -> bool: return button.text == "Apply All")
+	check(apply_buttons.size() == 1 and apply_buttons[0].disabled, "the Apply All button is disabled")
+	cutter.name = "Cutter"
+	check(await ShotScene.wait_until(_tree, func() -> bool: return _blender.get_evaluation_info(p_cube).get("error") == "" and not _blender.is_evaluating(p_cube), 60.0), "the error is gone when the object is back")
+	history.undo()
+	history.undo()
+	await _evaluated(p_cube)
+	cutter.free()
+	check_eq(_blender.get_modifier_stack(p_cube).size(), 1, "the Boolean is undone")
 
 	# Apply All bakes the result; undo brings the stack back.
 	var evaluated_mesh := p_cube.mesh
@@ -373,6 +450,28 @@ func _check_render() -> void:
 	check(await ShotScene.wait_until(_tree, func() -> bool: return filesystem.get_file_type(png) == "CompressedTexture2D", 30.0), "the editor imported the new file as a texture: '%s'" % filesystem.get_file_type(png))
 	for leftover in [png, png + ".import"]:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(leftover))
+
+	# Cancel ends Blender on purpose: that is not a failed start, and what waited behind the render still happens.
+	_blender.get_bridge().request({"cmd": "hello"})
+	var waiting := MeshInstance3D.new()
+	waiting.mesh = BoxMesh.new()
+	EditorInterface.get_edited_scene_root().add_child(waiting)
+	waiting.owner = EditorInterface.get_edited_scene_root()
+	var waiting_source := waiting.mesh
+	check(_blender.render_current_view({"width": 2048, "height": 2048, "match_viewport": false, "samples": 4096}), "a long render")
+	_blender.add_modifier(waiting, "SUBSURF", {"levels": 1})
+	await _tree.create_timer(1.0).timeout
+	check(_blender.is_rendering() and _blender.is_evaluating(waiting), "an evaluation waits behind the render")
+	_blender.cancel_render()
+	result = await _blender.render_finished
+	check(not result[0] and str(result[1]).contains("cancelled"), "the cancelled render says so: '%s'" % result[1])
+	check(_blender.get_status() != TetraBlenderEditorPlugin.STATUS_FAILED, "cancelling is not a failed start: '%s' '%s'" % [_blender.get_status_text(), _blender.get_status_hint()])
+	check(await ShotScene.wait_until(_tree, func() -> bool: return not _blender.is_evaluating(waiting), 120.0), "the evaluation that waited is sent again")
+	check_eq(_blender.get_evaluation_info(waiting).get("error"), "", "without an error")
+	check(waiting.mesh != waiting_source, "and its result arrives")
+	check(_blender.get_status() != TetraBlenderEditorPlugin.STATUS_FAILED, "the dock is not left in the failed state")
+	_history(waiting).undo()
+	waiting.free()
 
 	check(not _blender.render_current_view({"camera": "scene"}), "rendering through a scene camera needs one")
 	check_eq(_blender.get_last_error(), "The scene has no Camera3D.", "and says so")

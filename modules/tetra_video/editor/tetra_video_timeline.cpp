@@ -224,8 +224,15 @@ void TetraVideoTimeline::_project_changed() {
 		selection = kept;
 		emit_signal(SNAME("selection_changed"));
 	}
-	if (project.is_valid() && active_track >= project->get_track_count()) {
-		active_track = -1;
+	// The active track is a track, not a row: it follows its track when others are added, removed, moved or
+	// restored by undo, and there is none once that track is gone.
+	const int followed = project.is_valid() && active_track_uid > 0 ? project->find_track_by_uid(active_track_uid) : -1;
+	if (followed != active_track) {
+		active_track = followed;
+		if (followed < 0) {
+			active_track_uid = 0;
+		}
+		emit_signal(SNAME("active_track_changed"), active_track);
 	}
 	if (drag_mode != DRAG_NONE && drag_mode != DRAG_SEEK) {
 		_cancel_drag();
@@ -1253,6 +1260,7 @@ void TetraVideoTimeline::set_project(const Ref<TetraVideoProject> &p_project) {
 	clips_revision = UINT64_MAX;
 	selection.clear();
 	active_track = -1;
+	active_track_uid = 0;
 	zone_in = -1;
 	zone_out = -1;
 	playhead = 0;
@@ -1416,6 +1424,7 @@ void TetraVideoTimeline::set_active_track(int p_track) {
 		return;
 	}
 	active_track = track;
+	active_track_uid = track >= 0 ? project->get_track_uid(track) : 0;
 	queue_redraw();
 	emit_signal(SNAME("active_track_changed"), active_track);
 }

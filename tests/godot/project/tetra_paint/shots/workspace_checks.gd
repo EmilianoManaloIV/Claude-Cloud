@@ -486,6 +486,23 @@ func _test_menus() -> void:
 	ws.menu_option(ws.FILE_CLOSE)
 	check(not ws.has_document(), "File > Close returns to the welcome page")
 
+	# Sizes that would need gigabytes per layer are refused by the dialog.
+	var small: TetraImageDocument = ws.new_document(8, 8)
+	ws.menu_option(ws.FILE_NEW)
+	var new_dialog := _visible_dialog("Create a New Image")
+	if check(new_dialog != null, "File > New opens its dialog"):
+		for spin: SpinBox in new_dialog.find_children("*", "SpinBox", true, false):
+			spin.value = 16384
+		new_dialog.get_ok_button().pressed.emit()
+		check(ws.get_document() == small, "a 16384 x 16384 image is not created")
+		var warnings := root.find_children("*", "AcceptDialog", true, false).filter(func(d: AcceptDialog) -> bool: return d.visible and d.get_text().contains("too large"))
+		if check(warnings.size() == 1, "and a warning says why"):
+			warnings[0].hide()
+		for spin: SpinBox in new_dialog.find_children("*", "SpinBox", true, false):
+			spin.value = 64
+	ws.close_document()
+	await _frames(2)
+
 
 func _visible_dialog(p_title: String) -> AcceptDialog:
 	for dialog: AcceptDialog in ws.find_children("*", "AcceptDialog", true, false):
@@ -635,6 +652,35 @@ func _test_filters() -> void:
 		await _wait_for(func() -> bool: return not ws.is_filter_running())
 	await _frames(2)
 
+	# The dialog's colour picker works in display colours, the engine in linear ones.
+	if gegl:
+		doc = ws.new_document(16, 16, Color.WHITE)
+		ws.show_operation_dialog("gegl:color-overlay")
+		var grey := Color(0.5, 0.5, 0.5, 1.0)
+		dialog.get_param_panel().set_value("value", grey)
+		dialog.get_ok_button().pressed.emit()
+		check(await _wait_for(func() -> bool: return not ws.is_filter_running() and doc.get_undo_names().size() == 1), "the colour overlay is applied")
+		check(_close(_pixel(doc, 8, 8), grey), "a colour picked in a filter dialog is the colour on the canvas: " + str(_pixel(doc, 8, 8)))
+		ws.show_operation_dialog("gegl:color-overlay")
+		check(_close(dialog.get_values()["value"], grey), "and is offered again as it was picked: " + str(dialog.get_values()["value"]))
+		dialog.get_cancel_button().pressed.emit()
+		await _wait_for(func() -> bool: return not ws.is_filter_running())
+
+	# Replacing the image while a filter is being applied must not leave the workspace busy.
+	doc = ws.new_document(1024, 1024, Color.WHITE)
+	check_eq(ws.apply_operation("native:gaussian-blur"), OK, "a filter to repeat")
+	ws.repeat_last_operation()
+	check(ws.is_filter_running(), "the repeated filter runs off the main thread")
+	check_eq(ws.apply_operation("native:invert"), ERR_BUSY, "and the workspace is busy meanwhile")
+	doc = ws.new_document(32, 32, Color.WHITE)
+	await _wait_for(func() -> bool: return not ws.is_filter_running())
+	await _frames(2)
+	check_eq(ws.apply_operation("native:invert"), OK, "a new image during a running filter ends the busy state")
+	check_eq(doc.get_undo_names().size(), 1, "and the abandoned result does not land in the new image")
+	var shields: Array = ws.find_children("*", "Label", true, false).filter(func(l: Label) -> bool: return l.text.begins_with("Applying") and l.is_visible_in_tree())
+	check(shields.is_empty(), "the busy shield is gone")
+	await _frames(2)
+
 
 func _test_files() -> void:
 	# A flat image in the project: open by double-click path, edit, save, re-import.
@@ -674,6 +720,29 @@ func _test_files() -> void:
 	# With layers a flat file needs a decision.
 	doc.add_layer("Second")
 	check(not ws.can_save_directly(), "two layers cannot go into a png directly")
+	var ora_path := TMP_PNG.get_basename() + ".ora"
+	ws.menu_option(ws.FILE_SAVE)
+	var choice := _visible_dialog("Save Layered Image")
+	if check(choice != null, "Save asks what to do with the layers"):
+		choice.custom_action.emit("flatten")
+		check(not choice.visible, "Export Flattened closes the question")
+		check_eq(ws.get_document_path(), TMP_PNG, "and keeps the png as the document")
+		check(ws.is_modified(), "but the layers are still unsaved")
+		check_eq(ws.get_title_text(), "_tmp_edit.png (*)", "and the title says so")
+		# Another image's .ora of the same name is never overwritten silently.
+		var other := FileAccess.open(ora_path, FileAccess.WRITE)
+		other.store_string("someone else's layers")
+		other.close()
+		ws.menu_option(ws.FILE_SAVE)
+		choice = _visible_dialog("Save Layered Image")
+		choice.get_ok_button().pressed.emit()
+		check_eq(FileAccess.get_file_as_string(ora_path), "someone else's layers", "Save as .ora leaves an existing .ora alone")
+		check_eq(ws.get_document_path(), TMP_PNG, "the document stays where it was")
+		var save_as := _visible_dialog("Save Image")
+		if check(save_as != null, "and the file dialog (which asks before overwriting) opens instead"):
+			save_as.hide()
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(ora_path))
+		await _frames(2)
 	ws.menu_option(ws.FILE_SAVE)
 	var dialog := _visible_dialog("Save Layered Image")
 	if check(dialog != null, "Save asks: export flattened or save as .ora"):

@@ -46,6 +46,9 @@ private:
 	Button *cancel_render_button = nullptr;
 	Label *status_label = nullptr;
 	EditorFileDialog *file_dialog = nullptr;
+	ConfirmationDialog *overwrite_dialog = nullptr;
+	// The existing output file the user has agreed to replace.
+	String overwrite_allowed;
 
 	void _update_presets();
 	void _update_preset_label();
@@ -55,6 +58,7 @@ private:
 	void _range_selected(int p_index);
 	void _browse_pressed();
 	void _file_selected(const String &p_path);
+	void _overwrite_confirmed();
 	void _render_progress(int p_frame, double p_percent);
 	void _render_finished(bool p_ok, const String &p_message);
 

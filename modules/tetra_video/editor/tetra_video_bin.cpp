@@ -168,11 +168,18 @@ void TetraVideoBin::_delete_confirmed() {
 		return;
 	}
 	const PackedInt32Array ids = get_selected_ids();
+	PackedStringArray refused;
 	project->begin_undo_group(TTR("Delete Bin Clips"));
 	for (int i = 0; i < ids.size(); i++) {
-		project->remove_bin_clip(ids[i], true);
+		const String name = project->get_bin_clip(ids[i])["name"];
+		if (!project->remove_bin_clip(ids[i], true)) {
+			refused.push_back(vformat("%s: %s", name, project->get_last_error()));
+		}
 	}
 	project->end_undo_group();
+	if (!refused.is_empty()) {
+		emit_signal(SNAME("edit_refused"), vformat(TTR("Not deleted: %s"), String("; ").join(refused)));
+	}
 }
 
 Variant TetraVideoBin::_get_drag_data_fw(const Point2 &p_point) {
@@ -333,6 +340,7 @@ void TetraVideoBin::_bind_methods() {
 
 	ADD_SIGNAL(MethodInfo("clip_activated", PropertyInfo(Variant::INT, "bin_id")));
 	ADD_SIGNAL(MethodInfo("import_requested", PropertyInfo(Variant::PACKED_STRING_ARRAY, "paths")));
+	ADD_SIGNAL(MethodInfo("edit_refused", PropertyInfo(Variant::STRING, "message")));
 }
 
 TetraVideoBin::TetraVideoBin() {

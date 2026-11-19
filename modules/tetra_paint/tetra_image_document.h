@@ -265,7 +265,14 @@ protected:
 	static void _bind_methods();
 
 public:
-	// Document.
+	// Document. Every layer is one float RGBA buffer of the canvas size (16
+	// bytes per pixel, and strokes and undo steps copy it), so the area is
+	// limited as well as the sides: MAX_PIXELS is 1 GiB per layer.
+	static constexpr int MAX_SIDE = 16384;
+	static constexpr int64_t MAX_PIXELS = 8192 * 8192;
+	static bool is_size_supported(int p_width, int p_height) {
+		return p_width >= 1 && p_height >= 1 && p_width <= MAX_SIDE && p_height <= MAX_SIDE && int64_t(p_width) * p_height <= MAX_PIXELS;
+	}
 	Error create(int p_width, int p_height, const Color &p_fill = Color(1, 1, 1, 1));
 	Vector2i get_size() const { return Vector2i(width, height); }
 	int get_width() const { return width; }

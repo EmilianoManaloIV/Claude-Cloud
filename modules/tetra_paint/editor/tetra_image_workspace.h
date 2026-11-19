@@ -261,6 +261,7 @@ private:
 	void _save_requested();
 	void _save_choice_action(const String &p_action);
 	void _save_choice_confirmed();
+	bool _check_size(const Size2i &p_size);
 	Error _write_file(const String &p_path, bool p_becomes_document);
 	void _file_written(const String &p_path);
 	void _popup_amount_dialog(MenuOption p_option);

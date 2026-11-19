@@ -580,7 +580,7 @@ Error TetraImageDocument::rotate_image(int p_degrees) {
 Error TetraImageDocument::scale_image(const Vector2i &p_size, Interpolation p_interpolation) {
 	TETRA_REQUIRE_IDLE_V(ERR_BUSY);
 	ERR_FAIL_COND_V(width == 0, ERR_UNCONFIGURED);
-	ERR_FAIL_COND_V(p_size.x < 1 || p_size.y < 1 || p_size.x > 16384 || p_size.y > 16384, ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(!is_size_supported(p_size.x, p_size.y), ERR_INVALID_PARAMETER);
 	if (p_size == get_size()) {
 		return OK;
 	}
@@ -599,7 +599,7 @@ Error TetraImageDocument::scale_image(const Vector2i &p_size, Interpolation p_in
 Error TetraImageDocument::resize_canvas(const Vector2i &p_size, const Vector2i &p_offset) {
 	TETRA_REQUIRE_IDLE_V(ERR_BUSY);
 	ERR_FAIL_COND_V(width == 0, ERR_UNCONFIGURED);
-	ERR_FAIL_COND_V(p_size.x < 1 || p_size.y < 1 || p_size.x > 16384 || p_size.y > 16384, ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(!is_size_supported(p_size.x, p_size.y), ERR_INVALID_PARAMETER);
 	if (p_size == get_size() && p_offset == Vector2i()) {
 		return OK;
 	}

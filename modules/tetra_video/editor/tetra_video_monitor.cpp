@@ -431,6 +431,11 @@ void TetraVideoMonitor::project_changed() {
 			show_project();
 		}
 	}
+	if (project_engine.is_valid() && project_engine->is_playing() && (project.is_null() || project->get_duration() == 0)) {
+		// The graph of an emptied timeline is not rebuilt, so the engine would go on playing the clips that
+		// were just deleted.
+		project_engine->pause();
+	}
 	_apply_preview_size();
 	_update_transport();
 	_update_timecode();

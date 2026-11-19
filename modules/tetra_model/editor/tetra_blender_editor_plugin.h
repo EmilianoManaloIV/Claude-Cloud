@@ -78,6 +78,8 @@ private:
 		bool dirty = false;
 		String error;
 		Dictionary counts;
+		// What the stack's object parameters resolved to when it was last sent.
+		uint32_t object_signature = 0;
 	};
 
 	struct LastOperation {
@@ -102,12 +104,15 @@ private:
 	EditorFileDialog *import_dialog = nullptr;
 	Timer *status_timer = nullptr;
 	Timer *evaluation_timer = nullptr;
+	Timer *object_watch_timer = nullptr;
 
 	Status status = STATUS_NOT_STARTED;
 	String status_text;
 	String status_hint;
 	// Why Blender is not running although it was asked to.
 	String start_error;
+	// The launcher that start_error is about: another one is worth a new attempt.
+	String start_error_launcher;
 	String last_error;
 
 	SchemaState schema_states[SCHEMA_MAX] = {};
@@ -134,6 +139,10 @@ private:
 	void _bridge_started();
 	void _bridge_stopped();
 	void _bridge_progress(const Dictionary &p_event);
+	void _settings_changed();
+	void _retry_failed();
+	void _watch_objects();
+	static uint32_t _object_signature(MeshInstance3D *p_node);
 
 	void _schemas_loaded(const Dictionary &p_result, int p_kind);
 

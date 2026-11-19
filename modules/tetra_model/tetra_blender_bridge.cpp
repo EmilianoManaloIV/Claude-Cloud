@@ -37,6 +37,17 @@ Dictionary make_error(const String &p_message) {
 	return result;
 }
 
+// What a job answers that stop() ended: "stopped" tells a deliberate stop from a failure.
+Dictionary make_stopped_error() {
+	Dictionary result = make_error(TTR("The Blender bridge was stopped."));
+	result["stopped"] = true;
+	return result;
+}
+
+// Exchange directories of editors that crashed are never removed by their owner. A directory
+// in use changes with every request, so one that has not changed for a day is abandoned.
+const uint64_t STALE_EXCHANGE_SEC = 24 * 60 * 60;
+
 bool is_ok(const Dictionary &p_result) {
 	return bool(p_result.get("ok", false));
 }
@@ -268,6 +279,22 @@ void remove_dir_recursive(const String &p_dir) {
 	}
 	dir.unref();
 	DirAccess::remove_absolute(p_dir);
+}
+
+// Removes what editors that did not exit normally left in the cache.
+void remove_stale_exchange_dirs(const String &p_keep) {
+	const String base = cache_dir();
+	const uint64_t now = uint64_t(OS::get_singleton()->get_unix_time());
+	for (const String &name : DirAccess::get_directories_at(base)) {
+		const String dir = base.path_join(name);
+		if (!name.begins_with("exchange-") || dir == p_keep) {
+			continue;
+		}
+		const uint64_t modified = FileAccess::get_modified_time(dir);
+		if (modified > 0 && now > modified && now - modified > STALE_EXCHANGE_SEC) {
+			remove_dir_recursive(dir);
+		}
+	}
 }
 
 } // namespace
@@ -637,7 +664,7 @@ Dictionary TetraBlenderBridge::_transact(const Dictionary &p_command, double p_t
 				}
 			}
 			if (!alive) {
-				answer = make_error(vformat("Blender exited while running '%s'. %s", name, _stderr_summary()));
+				answer = stop_requested.is_set() ? make_stopped_error() : make_error(vformat("Blender exited while running '%s'. %s", name, _stderr_summary()));
 				break;
 			}
 			if (p_timeout_sec > 0.0 && double(OS::get_singleton()->get_ticks_usec() - started) > p_timeout_sec * 1000000.0) {
@@ -774,7 +801,7 @@ Error TetraBlenderBridge::start() {
 }
 
 void TetraBlenderBridge::stop() {
-	_cancel_queued_jobs(TTR("The Blender bridge was stopped."));
+	_cancel_queued_jobs(true);
 	if (request_mutex.try_lock()) {
 		// Nothing is in flight, so Blender can be asked to leave by itself.
 		if (process_alive.is_set() && server_ready.is_set()) {
@@ -791,9 +818,11 @@ void TetraBlenderBridge::stop() {
 		return;
 	}
 	// Another thread is waiting for an answer; ending the process is the only way to interrupt it.
+	stop_requested.set();
 	_kill_process();
 	MutexLock lock(request_mutex);
 	_cleanup_process();
+	stop_requested.clear();
 }
 
 bool TetraBlenderBridge::is_running() const {
@@ -828,6 +857,7 @@ String TetraBlenderBridge::get_exchange_dir() {
 	MutexLock lock(state_mutex);
 	if (exchange_dir.is_empty()) {
 		exchange_dir = cache_dir().path_join(vformat("exchange-%d-%d", OS::get_singleton()->get_process_id(), uint64_t(get_instance_id())));
+		remove_stale_exchange_dirs(exchange_dir);
 	}
 	if (!DirAccess::dir_exists_absolute(exchange_dir)) {
 		DirAccess::make_dir_recursive_absolute(exchange_dir);
@@ -1241,7 +1271,7 @@ void TetraBlenderBridge::_queue_job(JobKind p_kind, const Dictionary &p_command,
 	async_semaphore.post();
 }
 
-void TetraBlenderBridge::_cancel_queued_jobs(const String &p_reason) {
+void TetraBlenderBridge::_cancel_queued_jobs(bool p_report) {
 	List<Job> cancelled;
 	{
 		MutexLock lock(async_mutex);
@@ -1257,8 +1287,8 @@ void TetraBlenderBridge::_cancel_queued_jobs(const String &p_reason) {
 				DirAccess::remove_absolute(file);
 			}
 		}
-		if (!destroying.is_set()) {
-			callable_mp_static(&TetraBlenderBridge::_async_finish_static).call_deferred(get_instance_id(), job.done, int(job.kind), make_error(p_reason), job.context);
+		if (p_report && !destroying.is_set()) {
+			callable_mp_static(&TetraBlenderBridge::_async_finish_static).call_deferred(get_instance_id(), job.done, int(job.kind), make_stopped_error(), job.context);
 		}
 	}
 }
@@ -1469,7 +1499,7 @@ TetraBlenderBridge::TetraBlenderBridge() {
 TetraBlenderBridge::~TetraBlenderBridge() {
 	destroying.set();
 	async_exit.set();
-	_cancel_queued_jobs(String());
+	_cancel_queued_jobs(false);
 	// Ends a request the worker thread may be waiting on.
 	_kill_process();
 	if (async_thread.is_started()) {

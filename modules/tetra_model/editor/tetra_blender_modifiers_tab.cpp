@@ -357,7 +357,8 @@ void TetraBlenderModifiersTab::_update_info() {
 	const Dictionary info = has_stack ? plugin->get_evaluation_info(target) : Dictionary();
 	const bool evaluating = info.get("evaluating", false);
 	const String error = info.get("error", String());
-	apply_button->set_disabled(!has_stack || evaluating);
+	// A stack whose evaluation failed has no result to bake.
+	apply_button->set_disabled(!has_stack || evaluating || !error.is_empty());
 
 	String text;
 	if (evaluating) {

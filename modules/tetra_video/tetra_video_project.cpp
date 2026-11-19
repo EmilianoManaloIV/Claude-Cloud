@@ -313,6 +313,44 @@ void TetraVideoProject::_commit(const String &p_name, const State &p_next) {
 
 // Profile.
 
+// Every frame number of the state is multiplied by p_num / p_den: lengths, positions, in and out points, fades
+// and markers keep their time when the frame rate changes. Rounding never makes clips overlap, leave their
+// media or lose their last frame.
+void TetraVideoProject::_rescale_frames(State &r_state, int64_t p_num, int64_t p_den) {
+	auto scale = [p_num, p_den](int p_frame) -> int {
+		return int(CLAMP((int64_t(p_frame) * p_num + p_den / 2) / p_den, int64_t(0), int64_t(INT_MAX)));
+	};
+	for (BinClip &bin : r_state.bin) {
+		bin.length = MAX(1, scale(bin.length));
+	}
+	for (int track = 0; track < r_state.tracks.size(); track++) {
+		int free_from = 0;
+		for (int index : _sorted_track_clips(r_state, track)) {
+			Clip &clip = r_state.clips.write[index];
+			const int start = MAX(scale(clip.position), free_from);
+			int length = MAX(1, scale(clip.end()) - start);
+			int in = scale(clip.in);
+			const BinClip &bin = r_state.bin[_find_bin(r_state, clip.bin_id)];
+			if (!_bin_is_still(bin)) {
+				length = MIN(length, bin.length);
+				in = MIN(in, bin.length - length);
+			}
+			clip.fade_in = scale(clip.fade_in);
+			clip.fade_out = scale(clip.fade_out);
+			clip.position = start;
+			clip.in = in;
+			clip.out = in + length - 1;
+			_clamp_fades(clip);
+			free_from = clip.end();
+		}
+	}
+	int previous = -1;
+	for (Marker &marker : r_state.markers) {
+		marker.frame = MAX(scale(marker.frame), previous + 1);
+		previous = marker.frame;
+	}
+}
+
 bool TetraVideoProject::set_profile(int p_width, int p_height, int p_fps_num, int p_fps_den, int p_sample_rate) {
 	if (p_width < 1 || p_height < 1 || p_fps_num < 1 || p_fps_den < 1 || p_sample_rate < 1) {
 		return _fail("Profile values must be positive.");
@@ -326,6 +364,9 @@ bool TetraVideoProject::set_profile(int p_width, int p_height, int p_fps_num, in
 	next.fps_num = p_fps_num;
 	next.fps_den = p_fps_den;
 	next.sample_rate = p_sample_rate;
+	if (int64_t(p_fps_num) * state.fps_den != int64_t(state.fps_num) * p_fps_den) {
+		_rescale_frames(next, int64_t(p_fps_num) * state.fps_den, int64_t(state.fps_num) * p_fps_den);
+	}
 	_commit(TTR("Change Profile"), next);
 	return true;
 }
@@ -502,6 +543,7 @@ int TetraVideoProject::add_track(TrackKind p_kind, const String &p_name, int p_i
 	Track track;
 	track.kind = p_kind;
 	track.name = p_name;
+	track.uid = next_track_uid++;
 	if (track.name.is_empty()) {
 		int same_kind = 1;
 		for (const Track &other : next.tracks) {
@@ -517,6 +559,19 @@ int TetraVideoProject::add_track(TrackKind p_kind, const String &p_name, int p_i
 	}
 	_commit(TTR("Add Track"), next);
 	return index;
+}
+
+int TetraVideoProject::get_track_uid(int p_index) const {
+	return p_index >= 0 && p_index < state.tracks.size() ? state.tracks[p_index].uid : 0;
+}
+
+int TetraVideoProject::find_track_by_uid(int p_uid) const {
+	for (int i = 0; i < state.tracks.size(); i++) {
+		if (state.tracks[i].uid == p_uid) {
+			return i;
+		}
+	}
+	return -1;
 }
 
 bool TetraVideoProject::remove_track(int p_index) {
@@ -1678,6 +1733,7 @@ void TetraVideoProject::set_max_undo_steps(int p_steps) {
 
 void TetraVideoProject::clear() {
 	clear_undo_history();
+	foreign = false;
 	_apply_state(State());
 }
 
@@ -1785,6 +1841,9 @@ void TetraVideoProject::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("save", "path"), &TetraVideoProject::save);
 	ClassDB::bind_method(D_METHOD("load", "path"), &TetraVideoProject::load);
 	ClassDB::bind_method(D_METHOD("load_from_xml", "xml"), &TetraVideoProject::load_from_xml);
+	ClassDB::bind_method(D_METHOD("is_foreign"), &TetraVideoProject::is_foreign);
+	ClassDB::bind_method(D_METHOD("get_track_uid", "index"), &TetraVideoProject::get_track_uid);
+	ClassDB::bind_method(D_METHOD("find_track_by_uid", "uid"), &TetraVideoProject::find_track_by_uid);
 	ClassDB::bind_method(D_METHOD("clear"), &TetraVideoProject::clear);
 	ClassDB::bind_static_method("TetraVideoProject", D_METHOD("value_to_mlt", "value"), &TetraVideoProject::value_to_mlt);
 

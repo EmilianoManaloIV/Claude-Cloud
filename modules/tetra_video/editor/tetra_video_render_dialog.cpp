@@ -6,6 +6,7 @@
 
 #include "core/config/project_settings.h"
 #include "core/io/dir_access.h"
+#include "core/io/file_access.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "editor/file_system/editor_file_system.h"
@@ -120,6 +121,8 @@ void TetraVideoRenderDialog::_browse_pressed() {
 void TetraVideoRenderDialog::_file_selected(const String &p_path) {
 	set_output_path(p_path);
 	_apply_extension();
+	// The file dialog has asked about replacing an existing file.
+	overwrite_allowed = ProjectSettings::get_singleton()->globalize_path(get_output_path()).simplify_path();
 }
 
 void TetraVideoRenderDialog::_render_progress(int p_frame, double p_percent) {
@@ -132,6 +135,7 @@ void TetraVideoRenderDialog::_render_finished(bool p_ok, const String &p_message
 	if (p_ok) {
 		progress_bar->set_value(100);
 		status_label->set_text(vformat(TTR("Finished: %s"), p_message));
+		overwrite_allowed = ProjectSettings::get_singleton()->globalize_path(p_message).simplify_path();
 		// A file rendered into the project appears in the FileSystem dock after a rescan.
 		const String local = ProjectSettings::get_singleton()->localize_path(p_message);
 		if (local.begins_with("res://") && EditorFileSystem::get_singleton() && !EditorFileSystem::get_singleton()->is_scanning()) {
@@ -147,6 +151,20 @@ void TetraVideoRenderDialog::_render_finished(bool p_ok, const String &p_message
 }
 
 void TetraVideoRenderDialog::ok_pressed() {
+	// A file that is already there is only replaced when the user said so: in the file dialog, here, or by
+	// rendering it from this dialog before.
+	const String path = ProjectSettings::get_singleton()->globalize_path(get_output_path()).simplify_path();
+	const bool is_source = project.is_valid() && TetraVideoRenderer::is_project_source(project, path);
+	if (!is_rendering() && !is_source && path != overwrite_allowed && FileAccess::exists(path)) {
+		overwrite_dialog->set_text(vformat(TTR("%s already exists.\nReplace it?"), path.get_file()));
+		overwrite_dialog->popup_centered();
+		return;
+	}
+	start_render();
+}
+
+void TetraVideoRenderDialog::_overwrite_confirmed() {
+	overwrite_allowed = ProjectSettings::get_singleton()->globalize_path(get_output_path()).simplify_path();
 	start_render();
 }
 
@@ -416,4 +434,10 @@ TetraVideoRenderDialog::TetraVideoRenderDialog() {
 	file_dialog->set_title(TTR("Render To"));
 	file_dialog->connect("file_selected", callable_mp(this, &TetraVideoRenderDialog::_file_selected));
 	add_child(file_dialog);
+
+	overwrite_dialog = memnew(ConfirmationDialog);
+	overwrite_dialog->set_title(TTR("Render to File"));
+	overwrite_dialog->set_ok_button_text(TTR("Replace"));
+	overwrite_dialog->connect(SceneStringName(confirmed), callable_mp(this, &TetraVideoRenderDialog::_overwrite_confirmed));
+	add_child(overwrite_dialog);
 }

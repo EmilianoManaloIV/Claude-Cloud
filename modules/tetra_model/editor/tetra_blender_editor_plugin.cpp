@@ -68,13 +68,45 @@ void TetraBlenderEditorPlugin::_begin_request() {
 }
 
 void TetraBlenderEditorPlugin::_note_result(const Dictionary &p_result) {
-	if (!bool(p_result.get("ok", false))) {
+	// A job ended by stop() (a cancelled render, "Restart Blender") is not a failure of Blender.
+	if (!bool(p_result.get("ok", false)) && !bool(p_result.get("stopped", false))) {
 		last_error = p_result.get("error", String());
 		if (!bridge->is_running()) {
 			start_error = last_error;
+			start_error_launcher = TetraBlenderBridge::find_launcher().get("description", String());
 		}
 	}
 	_update_status();
+}
+
+void TetraBlenderEditorPlugin::_settings_changed() {
+	// A start that failed is tried again once the settings name another Blender.
+	if (!start_error.is_empty() && !bridge->is_running() && !bridge->is_busy() && String(TetraBlenderBridge::find_launcher().get("description", String())) != start_error_launcher) {
+		_retry_failed();
+	}
+	_update_status();
+}
+
+// Forgets why Blender did not start and asks again for what failed since.
+void TetraBlenderEditorPlugin::_retry_failed() {
+	start_error = String();
+	for (int i = 0; i < SCHEMA_MAX; i++) {
+		if (schema_states[i] == SCHEMA_FAILED) {
+			load_schemas(SchemaKind(i));
+		}
+	}
+	Vector<ObjectID> failed;
+	for (const KeyValue<ObjectID, Evaluation> &kv : evaluations) {
+		if (!kv.value.error.is_empty()) {
+			failed.push_back(kv.key);
+		}
+	}
+	for (const ObjectID &id : failed) {
+		MeshInstance3D *node = ObjectDB::get_instance<MeshInstance3D>(id);
+		if (node && TetraBlenderScene::has_modifier_stack(node)) {
+			_queue_evaluation(node);
+		}
+	}
 }
 
 void TetraBlenderEditorPlugin::_fail(const String &p_action, const String &p_message) {
@@ -153,8 +185,8 @@ String TetraBlenderEditorPlugin::get_last_error() const {
 }
 
 void TetraBlenderEditorPlugin::restart_bridge() {
-	start_error = String();
 	bridge->stop();
+	_retry_failed();
 	_update_status();
 }
 
@@ -184,6 +216,12 @@ void TetraBlenderEditorPlugin::load_schemas(SchemaKind p_kind) {
 
 void TetraBlenderEditorPlugin::_schemas_loaded(const Dictionary &p_result, int p_kind) {
 	_note_result(p_result);
+	if (bool(p_result.get("stopped", false))) {
+		// The request was queued behind something that was cancelled: ask again.
+		schema_states[p_kind] = SCHEMA_NOT_LOADED;
+		load_schemas(SchemaKind(p_kind));
+		return;
+	}
 	if (bool(p_result.get("ok", false))) {
 		schemas[p_kind] = p_result.get("operations", Array());
 		schema_states[p_kind] = SCHEMA_LOADED;
@@ -318,6 +356,15 @@ void TetraBlenderEditorPlugin::_send_evaluation(ObjectID p_node) {
 	evaluation.dirty = false;
 	evaluation.in_flight = true;
 	evaluation.sent = evaluation.wanted;
+	evaluation.object_signature = _object_signature(node);
+	const String problem = TetraBlenderScene::find_object_problem(node, TetraBlenderScene::get_modifier_stack(node));
+	if (!problem.is_empty()) {
+		// Evaluating without the object would show, save and bake a mesh the stack does not describe.
+		evaluation.in_flight = false;
+		evaluation.error = problem;
+		emit_signal(SNAME("modifiers_evaluated"), node, false);
+		return;
+	}
 	bridge->set_join_triangles(EDITOR_GET(SETTING_JOIN_TRIANGLES));
 	const Array stack = TetraBlenderScene::to_bridge_stack(node, TetraBlenderScene::get_modifier_stack(node));
 	bridge->apply_modifier_stack_async(TetraBlenderScene::get_source_mesh(node), stack, callable_mp(this, &TetraBlenderEditorPlugin::_evaluation_done).bind(uint64_t(p_node), evaluation.sent));
@@ -338,6 +385,10 @@ void TetraBlenderEditorPlugin::_evaluation_done(const Dictionary &p_result, uint
 	}
 	Evaluation &evaluation = found->value;
 	evaluation.in_flight = false;
+	if (bool(p_result.get("stopped", false))) {
+		// Cancelled together with a render or by "Restart Blender": the stack still wants its answer.
+		evaluation.dirty = true;
+	}
 	const bool ok = p_result.get("ok", false);
 	// One request per node is in flight at a time, so answers arrive in
 	// order: an answer to an older stack is shown while its successor is
@@ -350,7 +401,7 @@ void TetraBlenderEditorPlugin::_evaluation_done(const Dictionary &p_result, uint
 		evaluation.counts["vertex_count"] = p_result.get("vertex_count", 0);
 		evaluation.counts["polygon_count"] = p_result.get("polygon_count", 0);
 		evaluation.counts["triangle_count"] = p_result.get("triangle_count", 0);
-	} else if (!ok && newest) {
+	} else if (!ok && newest && !evaluation.dirty) {
 		evaluation.error = p_result.get("error", String());
 	}
 	if (evaluation.dirty) {
@@ -451,6 +502,10 @@ bool TetraBlenderEditorPlugin::apply_modifiers(MeshInstance3D *p_node) {
 	if (!TetraBlenderScene::has_modifier_stack(p_node) || is_evaluating(p_node)) {
 		return false;
 	}
+	// After a failed evaluation the node still shows an older mesh, which is not what the stack describes.
+	if (!String(get_evaluation_info(p_node).get("error", String())).is_empty()) {
+		return false;
+	}
 	const Ref<Mesh> result = p_node->get_mesh();
 	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
 	undo_redo->create_action(TTR("Apply Blender Modifiers"), UndoRedo::MERGE_DISABLE, p_node);
@@ -471,6 +526,46 @@ void TetraBlenderEditorPlugin::evaluate_modifiers(MeshInstance3D *p_node) {
 	ERR_FAIL_NULL(p_node);
 	if (TetraBlenderScene::has_modifier_stack(p_node)) {
 		_queue_evaluation(p_node);
+	}
+}
+
+// The meshes and relative placement of the objects the node's modifiers refer to.
+uint32_t TetraBlenderEditorPlugin::_object_signature(MeshInstance3D *p_node) {
+	Array signature;
+	const Array stack = TetraBlenderScene::get_modifier_stack(p_node);
+	for (int i = 0; i < stack.size(); i++) {
+		const Dictionary modifier = stack[i];
+		const Dictionary object_paths = modifier.get("object_paths", Dictionary());
+		for (const KeyValue<Variant, Variant> &kv : object_paths) {
+			MeshInstance3D *other = p_node->is_inside_tree() ? Object::cast_to<MeshInstance3D>(p_node->get_node_or_null(kv.value)) : nullptr;
+			signature.push_back(i);
+			signature.push_back(kv.key);
+			if (other) {
+				signature.push_back(uint64_t(other->get_instance_id()));
+				signature.push_back(other->get_mesh().is_valid() ? uint64_t(other->get_mesh()->get_instance_id()) : uint64_t(0));
+				signature.push_back(p_node->get_global_transform().affine_inverse() * other->get_global_transform());
+			}
+		}
+	}
+	return signature.hash();
+}
+
+// An object a modifier refers to (the cutter of a Boolean) is part of the stack's input.
+void TetraBlenderEditorPlugin::_watch_objects() {
+	Vector<ObjectID> changed;
+	for (KeyValue<ObjectID, Evaluation> &kv : evaluations) {
+		MeshInstance3D *node = ObjectDB::get_instance<MeshInstance3D>(kv.key);
+		if (!node || !node->is_inside_tree() || !TetraBlenderScene::has_modifier_stack(node)) {
+			continue;
+		}
+		const uint32_t signature = _object_signature(node);
+		if (signature != kv.value.object_signature) {
+			kv.value.object_signature = signature;
+			changed.push_back(kv.key);
+		}
+	}
+	for (const ObjectID &id : changed) {
+		_queue_evaluation(ObjectDB::get_instance<MeshInstance3D>(id));
 	}
 }
 
@@ -896,6 +991,10 @@ bool TetraBlenderEditorPlugin::render_current_view(const Dictionary &p_settings)
 void TetraBlenderEditorPlugin::_render_done(const Dictionary &p_result) {
 	_note_result(p_result);
 	rendering = false;
+	if (bool(p_result.get("stopped", false))) {
+		emit_signal(SNAME("render_finished"), false, TTR("The render was cancelled."));
+		return;
+	}
 	const Ref<Image> image = p_result.get("image", Variant());
 	if (!bool(p_result.get("ok", false)) || image.is_null()) {
 		const String message = p_result.get("error", String());
@@ -947,7 +1046,7 @@ Error TetraBlenderEditorPlugin::save_render(const String &p_path) {
 void TetraBlenderEditorPlugin::_menu_about_to_popup() {
 	PopupMenu *menu = menu_button->get_popup();
 	menu->set_item_checked(menu->get_item_index(MENU_JOIN_TRIANGLES), EDITOR_GET(SETTING_JOIN_TRIANGLES));
-	menu->set_item_disabled(menu->get_item_index(MENU_RESTART), !bridge->is_running() && !bridge->is_busy());
+	menu->set_item_disabled(menu->get_item_index(MENU_RESTART), !bridge->is_running() && !bridge->is_busy() && start_error.is_empty());
 }
 
 void TetraBlenderEditorPlugin::_menu_option(int p_option) {
@@ -1018,7 +1117,7 @@ void TetraBlenderEditorPlugin::_notification(int p_what) {
 	switch (p_what) {
 		case NOTIFICATION_READY: {
 			EditorNode::get_singleton()->get_editor_selection()->connect("selection_changed", callable_mp(this, &TetraBlenderEditorPlugin::_selection_changed));
-			EditorSettings::get_singleton()->connect("settings_changed", callable_mp(this, &TetraBlenderEditorPlugin::_update_status));
+			EditorSettings::get_singleton()->connect("settings_changed", callable_mp(this, &TetraBlenderEditorPlugin::_settings_changed));
 			_update_status();
 		} break;
 	}
@@ -1127,6 +1226,12 @@ TetraBlenderEditorPlugin::TetraBlenderEditorPlugin() {
 	evaluation_timer->set_one_shot(true);
 	evaluation_timer->connect("timeout", callable_mp(this, &TetraBlenderEditorPlugin::_evaluation_timeout));
 	add_child(evaluation_timer);
+
+	object_watch_timer = memnew(Timer);
+	object_watch_timer->set_wait_time(0.5);
+	object_watch_timer->set_autostart(true);
+	object_watch_timer->connect("timeout", callable_mp(this, &TetraBlenderEditorPlugin::_watch_objects));
+	add_child(object_watch_timer);
 
 	menu_button = memnew(MenuButton);
 	menu_button->set_text(TTRC("Blender"));
