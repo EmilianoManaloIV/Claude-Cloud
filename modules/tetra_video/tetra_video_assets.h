@@ -17,7 +17,9 @@
 // "kind" ("video_effect", "audio_effect" or "transition"), "available" and
 // "fixed" (properties that are always sent and never shown). Numeric
 // parameters are expressed in display units; "factor" divides them on the
-// way to MLT.
+// way to MLT. A numeric parameter MLT can animate carries "animatable"; the
+// keyframes of such parameters ({name: [{frame, value, type}]}, as
+// TetraVideoProject lists them) are written as MLT animation strings.
 class TetraVideoAssets : public Object {
 	GDCLASS(TetraVideoAssets, Object);
 
@@ -30,7 +32,7 @@ public:
 	static TypedArray<Dictionary> get_transitions(bool p_available_only = true, int p_width = 1920, int p_height = 1080);
 	static Dictionary get_operation(const String &p_id, int p_width = 1920, int p_height = 1080);
 	static Dictionary get_default_values(const Dictionary &p_operation);
-	static Dictionary values_to_mlt_properties(const Dictionary &p_operation, const Dictionary &p_values);
-	static Dictionary effect_to_mlt_properties(const String &p_operation_id, const Dictionary &p_values, int p_width, int p_height, int p_length);
+	static Dictionary values_to_mlt_properties(const Dictionary &p_operation, const Dictionary &p_values, const Dictionary &p_keyframes = Dictionary());
+	static Dictionary effect_to_mlt_properties(const String &p_operation_id, const Dictionary &p_values, int p_width, int p_height, int p_length, const Dictionary &p_keyframes = Dictionary());
 	static void clear_cache();
 };

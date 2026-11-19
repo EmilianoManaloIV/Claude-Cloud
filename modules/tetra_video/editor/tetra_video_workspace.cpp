@@ -442,6 +442,7 @@ void TetraVideoWorkspace::_bin_import_requested(const PackedStringArray &p_paths
 
 void TetraVideoWorkspace::_monitor_position_changed(int p_frame) {
 	timeline->set_playhead(p_frame, monitor->is_playing());
+	effect_stack->set_playhead(p_frame);
 }
 
 void TetraVideoWorkspace::_timeline_seek_requested(int p_frame) {
@@ -1213,6 +1214,7 @@ TetraVideoWorkspace::TetraVideoWorkspace() {
 	effect_stack->set_name("EffectStack");
 	side_tabs->add_child(effect_stack);
 	side_tabs->set_tab_title(1, TTR("Effect Stack"));
+	effect_stack->connect("seek_requested", callable_mp(this, &TetraVideoWorkspace::_timeline_seek_requested));
 
 	// Timeline with its tool bar.
 	VBoxContainer *timeline_box = memnew(VBoxContainer);

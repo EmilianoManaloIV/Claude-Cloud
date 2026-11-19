@@ -40,6 +40,8 @@ private:
 		int fade_in = 0;
 		int fade_out = 0;
 		int effect_count = 0;
+		// Frames, from the clip start, at which an effect parameter has a keyframe; ascending.
+		PackedInt32Array keyframes;
 		int kind = 0;
 		bool on_audio_track = false;
 		String name;

@@ -270,18 +270,23 @@ String TetraVideoProject::to_mlt_xml(const Dictionary &p_options) const {
 				xml.property(3, "tetra:fade_in", clip.fade_in);
 				xml.property(3, "tetra:fade_out", clip.fade_out);
 			}
-			// Filters on a playlist entry see frame 0 at the start of the clip, which keeps animations clip-relative.
+			// A filter on a playlist entry is handed source frame numbers. Its own in point is subtracted from
+			// them (mlt_filter_get_position), so in/out equal to the clip's make animations count from the clip start.
 			for (int i = 0; i < clip.effects.size(); i++) {
 				const Effect &effect = clip.effects[i];
-				xml.line(3, vformat("<filter id=\"clip%d_effect%d\">", clip.id, i));
+				xml.line(3, vformat("<filter id=\"clip%d_effect%d\" in=\"%d\" out=\"%d\">", clip.id, i, clip.in, clip.out));
 				xml.property(4, "mlt_service", effect.service);
-				xml.properties(4, TetraVideoAssets::effect_to_mlt_properties(effect.operation, effect.values, width, height, clip.length()));
+				const Dictionary keyframes = _effect_keyframes_to_dictionary(effect);
+				xml.properties(4, TetraVideoAssets::effect_to_mlt_properties(effect.operation, effect.values, width, height, clip.length(), keyframes));
 				if (!effect.enabled) {
 					xml.property(4, "disable", 1);
 				}
 				if (with_tetra) {
 					xml.property(4, "tetra:operation", effect.operation);
 					xml.property(4, "tetra:values", VariantUtilityFunctions::var_to_str(effect.values));
+					if (!keyframes.is_empty()) {
+						xml.property(4, "tetra:keyframes", VariantUtilityFunctions::var_to_str(keyframes));
+					}
 				}
 				xml.line(3, "</filter>");
 			}
@@ -293,7 +298,7 @@ String TetraVideoProject::to_mlt_xml(const Dictionary &p_options) const {
 					continue;
 				}
 				const int first = fade_in ? 0 : MAX(0, length - 1 - frames);
-				xml.line(3, vformat("<filter id=\"clip%d_fade_%s\">", clip.id, fade_in ? "in" : "out"));
+				xml.line(3, vformat("<filter id=\"clip%d_fade_%s\" in=\"%d\" out=\"%d\">", clip.id, fade_in ? "in" : "out", clip.in, clip.out));
 				if (track.kind == TRACK_AUDIO) {
 					xml.property(4, "mlt_service", "volume");
 					xml.property(4, "level", _audio_fade_animation(first, frames, fade_in));
@@ -671,6 +676,12 @@ Error TetraVideoProject::_load_xml(const String &p_xml, State &r_state, String &
 						if (parsed.get_type() == Variant::DICTIONARY) {
 							effect.values = parsed;
 						}
+						if (filter_properties.has("tetra:keyframes")) {
+							const Variant keyframes = VariantUtilityFunctions::str_to_var(_lookup(filter_properties, "tetra:keyframes"));
+							if (keyframes.get_type() == Variant::DICTIONARY) {
+								_effect_keyframes_from_dictionary(keyframes, effect);
+							}
+						}
 					} else {
 						effect.operation = "mlt:" + effect.service;
 						for (const KeyValue<String, String> &property : filter_properties) {
@@ -678,8 +689,26 @@ Error TetraVideoProject::_load_xml(const String &p_xml, State &r_state, String &
 								effect.values[property.key] = property.value;
 							}
 						}
+						// Animation strings of numeric parameters become keyframe tracks.
+						const Dictionary operation = _effect_operation(effect.operation, effect.service, loaded.width, loaded.height);
+						const Array params = operation.get("params", Array());
+						for (const Variant &entry : params) {
+							const Dictionary param = entry;
+							const String name = param.get("name", String());
+							if (!bool(param.get("animatable", false)) || !effect.values.has(name) || !String(effect.values[name]).contains_char('=')) {
+								continue;
+							}
+							KeyframeTrack keyframe_track;
+							keyframe_track.param = name;
+							if (_keyframes_from_mlt(effect.values[name], param.get("factor", 1.0), double(loaded.fps_num) / double(loaded.fps_den), keyframe_track.keys)) {
+								effect.values[name] = keyframe_track.keys[0].value;
+								effect.keyframes.push_back(keyframe_track);
+							}
+						}
 					}
 					clip.effects.push_back(effect);
+					// Whatever the file says, keyframes lie inside the clip.
+					_fit_keyframes(clip, 0, clip.length());
 				}
 				bool overlaps = false;
 				for (const Clip &other : track_clips) {

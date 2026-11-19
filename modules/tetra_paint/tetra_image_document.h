@@ -2,6 +2,8 @@
 
 #include "tetra_layer_modes.h"
 
+#include "core/io/file_access.h"
+
 #include "core/io/image.h"
 #include "core/object/ref_counted.h"
 #include "core/templates/local_vector.h"
@@ -254,6 +256,9 @@ private:
 
 	// Files.
 	Error _load_ora(const String &p_path);
+	Error _load_xcf(const Ref<FileAccess> &p_file, const String &p_what, bool p_quiet);
+	void _loaded();
+	PackedStringArray load_warnings;
 
 	static void _bind_selection_methods();
 	static void _bind_paint_methods();
@@ -389,6 +394,12 @@ public:
 
 	// Files.
 	Error load(const String &p_path);
+	// GIMP's XCF, read from an open file or from memory. The quiet variants
+	// print nothing when the data is not a readable XCF file.
+	Error load_xcf_file(const Ref<FileAccess> &p_file, bool p_quiet = false);
+	Error load_xcf_buffer(const PackedByteArray &p_data);
+	// What the last load() could not keep (XCF only; empty otherwise).
+	PackedStringArray get_load_warnings() const { return load_warnings; }
 	Error save_ora(const String &p_path) const;
 	Error export_image(const String &p_path, float p_quality = 0.9f) const;
 };

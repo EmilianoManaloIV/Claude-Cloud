@@ -11,9 +11,11 @@ operation UI can show them without knowing any of them.
 | `bridge/test_server.py` | Pure-Python client that checks the server on its own. |
 | `tetra_blender_bridge.{h,cpp}` | `TetraBlenderBridge`: process, protocol and the high-level API. |
 | `tetra_blender_mesh.{h,cpp}` | `TetraBlenderMesh`: mesh exchange files and the Godot/Blender conventions. |
+| `tetra_edit_mesh*.{h,cpp}` | `TetraEditMesh`: the polygon mesh and the modelling operations of the native Edit Mode (no Blender needed). |
+| `editor/tetra_mesh_edit_plugin.{h,cpp}` | `TetraMeshEditPlugin`: Edit Mode in the 3D viewport. |
 
-There is no editor UI in this module yet; everything below is in ClassDB and
-is what a UI codes against.
+Everything below is in ClassDB. The native mesh Edit Mode, which does not use
+Blender, is described under "Mesh Edit Mode (native)".
 
 ## Finding Blender
 
@@ -444,12 +446,208 @@ Screenshot drivers and the UI checks live in
 scripts/screenshot.sh build/screens/model_checks.png 3D res://tetra_model/shots/checks.gd   # prints "N checks, M failed"
 ```
 
+## Mesh Edit Mode (native)
+
+Interactive polygon editing in Godot's 3D viewport, without Blender. Two
+classes: `TetraEditMesh` holds the mesh and every operation (headless,
+scriptable); `TetraMeshEditPlugin` is the viewport tool.
+
+### TetraEditMesh : Resource
+
+A polygon mesh with real topology: vertices, explicit edges (`x < y`; edges
+without faces and vertices without edges are allowed) and faces of three or
+more vertices with one UV per corner, a material index and a smooth flag.
+Face loops are counter-clockwise seen from outside, as in Blender;
+`to_array_mesh()` writes Godot's clockwise triangles. Indices are stable
+until an operation changes topology.
+
+```gdscript
+var mesh := TetraEditMesh.new()
+mesh.add_cube()                                   # appended and selected
+mesh.set_select_mode(TetraEditMesh.SELECT_FACE)
+mesh.select_none()
+mesh.select_face(5)                               # Blender's cube: face 5 is the top
+mesh.extrude_region()
+mesh.translate_selection(mesh.get_selection_normal())
+assert(mesh.validate() == "")
+$MeshInstance3D.mesh = mesh.to_array_mesh()
+```
+
+| Group | Methods |
+| --- | --- |
+| Elements | `clear`, `get_vertex_count/get_edge_count/get_face_count`, `add_vertex(position)`, `add_edge(a, b)`, `add_face(vertices, uvs = [], material = 0, smooth = false)`, `get_vertex/set_vertex`, `get_vertex_positions/set_vertex_positions`, `get_edge_vertices(edge) -> Vector2i`, `find_edge(a, b)`, `get_edge_faces(edge)`, `get_face_vertices`, `get_face_uvs/set_face_uvs`, `get_face_material/set_face_material`, `is_face_smooth/set_face_smooth`, `get_face_normal`, `get_face_center`, `find_face(vertices)`, `materials` (Array of Material, by material index) |
+| Selection | `select_mode` (`SELECT_VERTEX/EDGE/FACE`), `select_vertex/edge/face(index, selected = true)`, `is_*_selected`, `get_selected_vertices/edges/faces`, `select_all`, `select_none`, `select_invert`, `select_linked`, `select_linked_from_vertex(vertex, selected = true)`, `select_more`, `select_less`, `get_edge_loop(edge)`, `get_edge_ring(edge)`, `select_edge_loop(edge, extend = false)`, `select_edge_ring(edge, extend = false)` |
+| Consistency | `validate() -> String`: empty when indices are in range, every face has at least three distinct vertices and all its edges, there are no duplicate edges or faces, and the selection is what the select mode's flushing produces |
+| Conversion | `to_array_mesh() -> ArrayMesh`, `from_mesh(mesh, merge_quads = false, weld_distance = 0.00001)` |
+| Storage / undo | `get_state() -> PackedByteArray`, `set_state(bytes) -> bool` (geometry, selection, select mode); the stored property `data` is the same bytes |
+| Primitives | `add_plane(size)`, `add_cube(size)`, `add_grid(x_subdivisions, y_subdivisions, size)`, `add_circle(vertices, radius, fill)`, `add_cylinder(vertices, radius, depth, fill)`, `add_cone(vertices, radius1, radius2, depth, fill)`, `add_uv_sphere(segments, rings, radius)`, `add_ico_sphere(subdivisions, radius)`; `get_primitive_operations()` (static, operation schema) and `add_primitive(id, values)`. `fill` is `FILL_NOTHING/NGON/TRIANGLE_FAN` |
+| Transform | `get_selection_pivot(PIVOT_MEDIAN or PIVOT_BOUNDING_BOX)`, `get_selection_normal()`, `transform_selection(transform, pivot, proportional_radius = 0)`, `translate_selection(offset, proportional_radius = 0)`, `rotate_selection(axis, angle, pivot, proportional_radius)`, `scale_selection(scale, pivot, proportional_radius)` |
+| Operations | `extrude_region`, `extrude_faces_individual(offset)`, `inset_faces(thickness, depth)`, `subdivide(cuts)`, `loop_cut(edge, cuts)`, `delete_selection(DELETE_VERTICES/EDGES/FACES/ONLY_FACES/ONLY_EDGES_AND_FACES)`, `dissolve_vertices/edges/faces`, `merge_at_center`, `merge_collapse`, `merge_by_distance(distance) -> removed`, `fill`, `bridge_edge_loops`, `flip_normals`, `recalculate_normals(inside = false)`, `shade_smooth(smooth = true)`, `duplicate_selection`, `separate_selection() -> TetraEditMesh`, `triangulate`, `tris_to_quads(face_angle, shape_angle) -> joined` |
+
+Operations act on the selection and return `false` (or `0`, or `null`) when
+there was nothing to do; they leave the result selected the way Blender does.
+
+Behaviour worth knowing:
+
+- **Selection flushing** follows Blender. Vertex mode: an edge or face is
+  selected when all its vertices are. Edge mode: vertices follow edges, a face
+  needs all its edges. Face mode: vertices and edges follow faces. Switching
+  vertex → edge → face keeps only what is entirely selected.
+- **Primitives** use Blender's parameters and are built in Blender's Z-up
+  layout, then rotated to Y-up: Blender's `(x, y, z)` is Godot's `(x, z, -y)`.
+  The plane, cube (vertex and face order included), grid and circle match
+  Blender index for index; the cone, cylinder and spheres have Blender's
+  topology and counts, with the poles/apex placed first or last rather than
+  where Blender's remove-doubles pass leaves them. Cube faces each get the
+  whole 0..1 UV square, not Blender's cross layout.
+- **Extrude region**: side faces along the region's border, wound outwards.
+  The original faces are removed when the region borders other faces; a lone
+  face keeps its original as the flipped bottom (a plane becomes a closed
+  box); a lone region with interior edges loses them (a grid becomes an open
+  box). Selected edges without selected faces become faces, lone vertices
+  become edges. A region without a border (a whole closed mesh) does nothing.
+- **Inset** is the region inset with even offset; `depth` moves the inner
+  faces along the region's vertex normals.
+- **Subdivide**: a quad with all four edges cut becomes a grid, a triangle
+  with all three a triangle grid, a quad with two opposite edges a ladder
+  (this is what `loop_cut` uses). Any other pattern inserts the new vertices
+  into the face, which becomes an n-gon — Blender would add corner and fan
+  patterns there. There is no smoothness parameter.
+- **Dissolve**: faces are joined when their outline is one simple loop
+  (a ring of faces around a hole is left alone). Dissolving edges also removes
+  end vertices left between two edges (Blender's default).
+- **Fill** makes a face along a closed selected edge loop, wound against its
+  neighbours; without a loop, one face through the selected vertices ordered
+  by angle; with two vertices, an edge. It is not Blender's grid or beauty fill.
+- **Bridge edge loops** needs exactly two closed loops of equal length.
+- **Recalculate normals** makes each island's winding consistent and then
+  outward by the sign of its volume about its centre, so it suits closed or
+  nearly closed islands; flat open sheets keep the orientation of their first
+  face.
+- `from_mesh` welds vertices by position, marks faces smooth when their vertex
+  normals differ from the face normal, and with `merge_quads` joins coplanar
+  triangle pairs that share UVs across the diagonal (best-shaped pairs first).
+  Tangents, vertex colours, UV2, bones and blend shapes are not carried.
+- `to_array_mesh` writes one surface per used material index (so surface
+  index and material index differ when an index is unused), splits vertices
+  of flat faces and shares those of smooth faces that have the same UV.
+- Bevel, knife, rip, vertex/edge slide, proportional editing in the viewport
+  tool and individual-origins pivots are not implemented here; use the Blender
+  operators tab for bevel.
+
+### Edit Mode in the 3D viewport
+
+Select a `MeshInstance3D` and press **Tab** in the 3D viewport, or use the
+**Edit Mode** button in the 3D toolbar. The first time, the node's mesh is
+converted (welded, coplanar triangle pairs joined into quads) into a
+`TetraEditMesh` stored in the node's metadata `tetra_edit_mesh` — this
+conversion is an undo step. From then on the node's `mesh` is the `ArrayMesh`
+generated from it; both are saved with the scene, and entering again is
+lossless. Leaving (Tab, the button, or selecting something else) keeps the
+result.
+
+| Input | Action |
+| --- | --- |
+| Tab | Enter / leave Edit Mode |
+| 1 / 2 / 3, or the Vertex / Edge / Face buttons | Select mode |
+| Click, Shift+click | Select; extend or toggle |
+| Drag from empty space | Box select (Shift extends); a click on empty space deselects |
+| Alt+click | Edge loop |
+| A / Alt+A / Ctrl+I | All / none / invert |
+| L / Shift+L | Select / deselect what is linked to the element under the cursor |
+| Ctrl+Numpad + / − (also Ctrl+= / Ctrl+-) | More / less |
+| G / R / S | Move / rotate / scale. X, Y, Z lock to an axis, Shift+X/Y/Z to the plane across it (the same key again unlocks); digits, `.`, `-` and Backspace type an exact value; Ctrl snaps to the 3D editor's snap steps; Enter or left click confirms, Esc or right click cancels |
+| E | Extrude region, then move along the normal |
+| I | Inset faces: drag towards the centre for the thickness, or type it |
+| Ctrl+R | Loop cut: a preview follows the edge under the cursor; the wheel or digits set the number of cuts; click confirms |
+| X or Delete | Delete menu: Vertices, Edges, Faces, Only Faces, Only Edges & Faces, Dissolve Vertices/Edges/Faces |
+| M | Merge menu: at Center, Collapse, by Distance |
+| F | New edge/face from the selection |
+| Shift+D | Duplicate, then move |
+| Shift+N | Recalculate normals outside |
+
+Ctrl+B is not bound (bevel is a Blender operator). The **Select** and **Mesh**
+menus in the 3D toolbar list every operation; entries ending in "..." open a
+`TetraOperationDialog` with a live preview. **Add > Mesh** (always in the 3D
+toolbar) creates a `MeshInstance3D` with an editable primitive, or adds the
+primitive to the mesh being edited.
+
+How it sits in Godot's 3D editor:
+
+- While in Edit Mode the plugin consumes the keys and mouse buttons above
+  (`AFTER_GUI_INPUT_STOP` plus `set_input_as_handled`), so Godot's own
+  E / R / F / M / Delete / Escape shortcuts do not fire; middle button, wheel
+  and right-button freelook still navigate. Godot's transform gizmo and the
+  node's selection box are hidden for the node being edited.
+- With "Emulate Numpad" on, the viewport rewrites the digit keys to numpad
+  keys before plugins see them; the plugin reads the physical key instead.
+- The overlay is real 3D geometry on the editor's gizmo layer (black wire and
+  points, orange selection, as in Blender): edge lines, vertex points in
+  vertex mode, face-centre dots in face mode and a translucent fill on
+  selected faces, drawn with a small view-space pull towards the camera. While
+  a G/R/S drag runs only its position buffers are rewritten
+  (`RenderingServer.mesh_surface_update_vertex_region`). Box select, the loop
+  cut preview and the readout are drawn on the 2D overlay.
+- Only elements that are not hidden behind the mesh can be picked or box
+  selected. Picking is a linear search with a ray test per candidate: fine for
+  meshes of a few thousand faces, slow beyond that.
+- Every operation, and every confirmed modal tool (E and Shift+D together
+  with their move), is one `EditorUndoRedoManager` action that swaps snapshots
+  (`get_state()`), also when the node is no longer in Edit Mode. Selection
+  changes alone are not undo steps.
+- **With the Blender dock**: operators and modifiers keep working on such a
+  node — they replace `mesh` as before. The edit mesh is then out of date, and
+  the plugin refreshes it from what the node shows: at once when the node is
+  in Edit Mode, otherwise the next time Edit Mode is entered (it compares
+  surface sizes and bounds). The refresh is a new conversion, so n-gons come
+  back as the triangles/quads Blender produced. With a live modifier stack,
+  Edit Mode edits the evaluated result, not the source mesh: apply the
+  modifiers first.
+
+```gdscript
+var edit := TetraMeshEditPlugin.get_singleton()
+var node := edit.add_mesh("cube", {"size": 2.0})        # Add > Mesh
+edit.enter_edit_mode(node)
+edit.set_select_mode(TetraEditMesh.SELECT_FACE)
+edit.get_edit_mesh().select_face(5)
+edit.refresh()                                          # after changing the mesh or selection directly
+edit.run_operation("extrude")                           # one undo action each
+edit.run_operation("translate", {"offset": Vector3(0, 1, 0)})
+edit.exit_edit_mode()
+```
+
+`TetraMeshEditPlugin`: `get_singleton()` (static), `enter_edit_mode(node) -> bool`,
+`exit_edit_mode()`, `is_edit_mode()`, `get_edited_node()`, `get_edit_mesh()`,
+`set_select_mode(mode)` / `get_select_mode()`, `get_operations()` (operation
+schema; ids such as `extrude`, `inset_faces`, `loop_cut` with `{edge, cuts}`,
+`subdivide`, `delete_faces`, `merge_center`, `add:<primitive>`),
+`run_operation(id, values = {}) -> bool`, `request_operation(id)` (what the
+menu does: run, or open the dialog), `get_operation_dialog()`,
+`start_modal(MODAL_GRAB/ROTATE/SCALE/INSET/LOOP_CUT)`, `get_modal()`,
+`get_modal_readout()`, `add_mesh(primitive, values = {}) -> MeshInstance3D`,
+`pick(camera, position) -> {vertex, edge, face}`, `get_overlay_counts()`,
+`refresh()`.
+
 ## Testing
 
 ```sh
 build/blender-venv/bin/python modules/tetra_model/bridge/test_server.py   # the server alone
 scripts/test.sh tetra_model                                               # the C++ classes, headless
 ```
+
+`test_edit_mesh.gd` and `test_edit_mesh_ops.gd` cover `TetraEditMesh` (exact
+counts and positions, `validate()` after every operation). Edit Mode itself
+needs the running editor:
+
+```sh
+scripts/screenshot.sh build/screens/editmode-extruded.png 3D res://tetra_model/shots/edit_mode.gd
+```
+
+prints `screenshot edit mode checks: <n> checks, <m> failed`; it drives the
+plugin through its scripting surface and through simulated mouse and key
+events, checks undo/redo in the editor's history, and also writes
+`build/screens/editmode-vertex.png`, `editmode-face.png`, `editmode-loopcut.png`
+and `editmode-dialog.png`.
 
 `test_blender_bridge.gd` is skipped with a message when no launcher is found.
 It writes `build/screens/blender-render.png`. `test_server.py

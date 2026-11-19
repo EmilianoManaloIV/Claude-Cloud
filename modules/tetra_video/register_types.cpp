@@ -14,6 +14,7 @@
 #include "editor/tetra_video_bin.h"
 #include "editor/tetra_video_editor_plugin.h"
 #include "editor/tetra_video_effect_stack.h"
+#include "editor/tetra_video_keyframe_strip.h"
 #include "editor/tetra_video_monitor.h"
 #include "editor/tetra_video_render_dialog.h"
 #include "editor/tetra_video_timeline.h"
@@ -46,6 +47,7 @@ void initialize_tetra_video_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_ABSTRACT_CLASS(TetraVideoMonitor);
 		GDREGISTER_ABSTRACT_CLASS(TetraVideoTimeline);
 		GDREGISTER_ABSTRACT_CLASS(TetraVideoEffectStack);
+		GDREGISTER_ABSTRACT_CLASS(TetraVideoKeyframeStrip);
 		GDREGISTER_ABSTRACT_CLASS(TetraVideoRenderDialog);
 		GDREGISTER_ABSTRACT_CLASS(TetraVideoWorkspace);
 		GDREGISTER_ABSTRACT_CLASS(TetraVideoEditorPlugin);

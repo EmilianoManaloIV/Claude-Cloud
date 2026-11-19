@@ -174,6 +174,8 @@ Dictionary _parse_parameter(const Vector<TetraXmlNode> &p_nodes, int p_node, int
 		}
 		if (type == "animated" || type == "keyframe" || type == "simplekeyframe") {
 			param["animated"] = true;
+			// A plain number that MLT animates: it can follow keyframes (TetraVideoProject's keyframe API).
+			param["animatable"] = true;
 		}
 	} else if (type == "bool") {
 		param["type"] = "bool";
@@ -432,7 +434,7 @@ Dictionary TetraVideoAssets::get_default_values(const Dictionary &p_operation) {
 	return values;
 }
 
-Dictionary TetraVideoAssets::values_to_mlt_properties(const Dictionary &p_operation, const Dictionary &p_values) {
+Dictionary TetraVideoAssets::values_to_mlt_properties(const Dictionary &p_operation, const Dictionary &p_values, const Dictionary &p_keyframes) {
 	Dictionary properties;
 	const Dictionary fixed = p_operation.get("fixed", Dictionary());
 	for (const KeyValue<Variant, Variant> &entry : fixed) {
@@ -452,6 +454,15 @@ Dictionary TetraVideoAssets::values_to_mlt_properties(const Dictionary &p_operat
 			continue;
 		}
 		String text;
+		if (p_keyframes.has(name) && (type == "int" || type == "float")) {
+			// An animated parameter is sent as an MLT animation string, each value converted like a constant.
+			text = TetraVideoProject::keyframes_to_mlt(p_keyframes[name], param.get("factor", 1.0), type == "int");
+			if (text.is_empty()) {
+				continue;
+			}
+			properties[name] = text;
+			continue;
+		}
 		if (type == "int" || type == "float") {
 			const double factor = param.get("factor", 1.0);
 			const double number = double(value) / factor;
@@ -485,10 +496,19 @@ Dictionary TetraVideoAssets::values_to_mlt_properties(const Dictionary &p_operat
 			properties[entry.key] = TetraVideoProject::value_to_mlt(entry.value);
 		}
 	}
+	// So do keyframes of parameters outside the schema, in MLT's own units.
+	for (const KeyValue<Variant, Variant> &entry : p_keyframes) {
+		if (!known.has(entry.key) && entry.value.get_type() == Variant::ARRAY) {
+			const String text = TetraVideoProject::keyframes_to_mlt(entry.value);
+			if (!text.is_empty()) {
+				properties[entry.key] = text;
+			}
+		}
+	}
 	return properties;
 }
 
-Dictionary TetraVideoAssets::effect_to_mlt_properties(const String &p_operation_id, const Dictionary &p_values, int p_width, int p_height, int p_length) {
+Dictionary TetraVideoAssets::effect_to_mlt_properties(const String &p_operation_id, const Dictionary &p_values, int p_width, int p_height, int p_length, const Dictionary &p_keyframes) {
 	Dictionary operation;
 	{
 		MutexLock lock(catalog_mutex);
@@ -497,7 +517,7 @@ Dictionary TetraVideoAssets::effect_to_mlt_properties(const String &p_operation_
 			operation = *found;
 		}
 	}
-	Dictionary properties = values_to_mlt_properties(operation, p_values);
+	Dictionary properties = values_to_mlt_properties(operation, p_values, p_keyframes);
 	for (const Variant &key : properties.keys()) {
 		properties[key] = _resolve_clip(properties[key], p_length);
 	}
@@ -515,7 +535,7 @@ void TetraVideoAssets::_bind_methods() {
 	ClassDB::bind_static_method("TetraVideoAssets", D_METHOD("get_transitions", "available_only", "width", "height"), &TetraVideoAssets::get_transitions, DEFVAL(true), DEFVAL(1920), DEFVAL(1080));
 	ClassDB::bind_static_method("TetraVideoAssets", D_METHOD("get_operation", "id", "width", "height"), &TetraVideoAssets::get_operation, DEFVAL(1920), DEFVAL(1080));
 	ClassDB::bind_static_method("TetraVideoAssets", D_METHOD("get_default_values", "operation"), &TetraVideoAssets::get_default_values);
-	ClassDB::bind_static_method("TetraVideoAssets", D_METHOD("values_to_mlt_properties", "operation", "values"), &TetraVideoAssets::values_to_mlt_properties);
-	ClassDB::bind_static_method("TetraVideoAssets", D_METHOD("effect_to_mlt_properties", "operation_id", "values", "width", "height", "length"), &TetraVideoAssets::effect_to_mlt_properties);
+	ClassDB::bind_static_method("TetraVideoAssets", D_METHOD("values_to_mlt_properties", "operation", "values", "keyframes"), &TetraVideoAssets::values_to_mlt_properties, DEFVAL(Dictionary()));
+	ClassDB::bind_static_method("TetraVideoAssets", D_METHOD("effect_to_mlt_properties", "operation_id", "values", "width", "height", "length", "keyframes"), &TetraVideoAssets::effect_to_mlt_properties, DEFVAL(Dictionary()));
 	ClassDB::bind_static_method("TetraVideoAssets", D_METHOD("clear_cache"), &TetraVideoAssets::clear_cache);
 }

@@ -28,7 +28,7 @@
 #include "scene/gui/spin_box.h"
 #include "scene/resources/texture.h"
 
-static const char *OPEN_EXTENSIONS[] = { "png", "jpg", "jpeg", "webp", "exr", "tga", "bmp", "ora" };
+static const char *OPEN_EXTENSIONS[] = { "png", "jpg", "jpeg", "webp", "exr", "tga", "bmp", "ora", "xcf" };
 static const char *FLAT_EXTENSIONS[] = { "png", "jpg", "jpeg", "webp", "exr" };
 
 static bool is_open_extension(const String &p_path) {
@@ -382,6 +382,12 @@ void TetraImageWorkspace::_build_dialogs() {
 	save_choice_dialog->connect("custom_action", callable_mp(this, &TetraImageWorkspace::_save_choice_action));
 	add_child(save_choice_dialog);
 
+	import_warnings_dialog = memnew(AcceptDialog);
+	import_warnings_dialog->set_title(TTR("Imported with Changes"));
+	import_warnings_dialog->get_label()->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+	import_warnings_dialog->get_label()->set_custom_minimum_size(Size2(560, 0) * EDSCALE);
+	add_child(import_warnings_dialog);
+
 	search_dialog = memnew(AcceptDialog);
 	search_dialog->set_title(TTR("Search Filters"));
 	search_dialog->set_ok_button_text(TTR("Open"));
@@ -604,7 +610,8 @@ void TetraImageWorkspace::_popup_file_dialog(int p_purpose) {
 		case FILE_PURPOSE_OPEN: {
 			file_dialog->set_title(TTR("Open Image"));
 			file_dialog->set_file_mode(FileDialog::FILE_MODE_OPEN_FILE);
-			file_dialog->add_filter("*.png, *.jpg, *.jpeg, *.webp, *.exr, *.tga, *.bmp, *.ora", TTR("Images"));
+			file_dialog->add_filter("*.png, *.jpg, *.jpeg, *.webp, *.exr, *.tga, *.bmp, *.ora, *.xcf", TTR("Images"));
+			file_dialog->add_filter("*.xcf", TTR("GIMP image (import)"));
 			file_dialog->set_current_dir(directory);
 		} break;
 		case FILE_PURPOSE_SAVE_AS: {
@@ -658,6 +665,20 @@ void TetraImageWorkspace::_open_checked(const String &p_path) {
 	const Error err = open_file(p_path);
 	if (err != OK) {
 		EditorNode::get_singleton()->show_warning(vformat(TTR("Could not open \"%s\" as an image (%s)."), p_path, error_names[err]));
+		return;
+	}
+	// What an imported file (XCF) holds that a Tetra document cannot keep is
+	// said once, when it is opened.
+	const PackedStringArray warnings = document->get_load_warnings();
+	if (!warnings.is_empty()) {
+		String text = vformat(TTR("\"%s\" was imported. Tetra does not write this format: Save will ask for an OpenRaster (.ora) file.\n"), p_path.get_file());
+		for (const String &warning : warnings) {
+			text += String(U"\n\u2022 ") + warning;
+		}
+		import_warnings_dialog->set_text(text);
+		import_warnings_dialog->popup_centered();
+	} else if (p_path.get_extension().to_lower() == "xcf") {
+		_status_message(vformat(TTR("Imported \"%s\"; Save will ask for an OpenRaster (.ora) file."), p_path.get_file()));
 	}
 }
 

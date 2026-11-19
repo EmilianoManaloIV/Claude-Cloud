@@ -133,7 +133,7 @@ void TetraVideoProject::_clamp_fades(Clip &r_clip) {
 
 // Cuts one clip in two at a timeline frame strictly inside it, ignoring links.
 // The left part keeps the id and the fade in, the new right part gets the fade
-// out, and both keep the effects.
+// out, and both keep the effects; keyframe tracks are cut at the same frame.
 int TetraVideoProject::_split_raw(State &r_state, int p_clip_index, int p_frame) {
 	Clip left = r_state.clips[p_clip_index];
 	const int offset = p_frame - left.position;
@@ -145,6 +145,9 @@ int TetraVideoProject::_split_raw(State &r_state, int p_clip_index, int p_frame)
 	right.link = 0;
 	left.out = left.in + offset - 1;
 	left.fade_out = 0;
+	// Both sides get a keyframe at the cut, so an animation runs on across it.
+	_fit_keyframes(right, offset, right.length());
+	_fit_keyframes(left, 0, left.length());
 	_clamp_fades(left);
 	_clamp_fades(right);
 	r_state.clips.write[p_clip_index] = left;
@@ -241,6 +244,32 @@ String TetraVideoProject::_check_state(const State &p_state) {
 		}
 		if (clip.fade_in < 0 || clip.fade_out < 0 || clip.fade_in > clip.length() || clip.fade_out > clip.length()) {
 			return vformat("clip %d has a fade longer than itself", clip.id);
+		}
+		for (int e = 0; e < clip.effects.size(); e++) {
+			const Vector<KeyframeTrack> &tracks = clip.effects[e].keyframes;
+			for (int t = 0; t < tracks.size(); t++) {
+				const KeyframeTrack &keyframe_track = tracks[t];
+				if (keyframe_track.param.is_empty() || keyframe_track.keys.is_empty()) {
+					return vformat("clip %d effect %d has an empty keyframe track", clip.id, e);
+				}
+				for (int u = 0; u < t; u++) {
+					if (tracks[u].param == keyframe_track.param) {
+						return vformat("clip %d effect %d animates \"%s\" twice", clip.id, e, keyframe_track.param);
+					}
+				}
+				for (int k = 0; k < keyframe_track.keys.size(); k++) {
+					const Keyframe &key = keyframe_track.keys[k];
+					if (key.frame < 0 || key.frame >= clip.length()) {
+						return vformat("clip %d effect %d has a keyframe of \"%s\" outside the clip (frame %d)", clip.id, e, keyframe_track.param, key.frame);
+					}
+					if (k > 0 && key.frame <= keyframe_track.keys[k - 1].frame) {
+						return vformat("clip %d effect %d has keyframes of \"%s\" out of order", clip.id, e, keyframe_track.param);
+					}
+					if (key.type < 0 || key.type >= KEYFRAME_TYPE_MAX || !Math::is_finite(key.value)) {
+						return vformat("clip %d effect %d has an illegal keyframe of \"%s\"", clip.id, e, keyframe_track.param);
+					}
+				}
+			}
 		}
 	}
 	for (int i = 0; i < p_state.clips.size(); i++) {
@@ -341,6 +370,7 @@ void TetraVideoProject::_rescale_frames(State &r_state, int64_t p_num, int64_t p
 			clip.in = in;
 			clip.out = in + length - 1;
 			_clamp_fades(clip);
+			_rescale_keyframes(clip, p_num, p_den);
 			free_from = clip.end();
 		}
 	}
@@ -866,6 +896,8 @@ bool TetraVideoProject::trim_clip_start(int p_id, int p_frame) {
 		clip.in = MAX(0, clip.in + delta);
 		clip.out = clip.in + new_length - 1;
 		_clamp_fades(clip);
+		// Keyframes stay on the source frames they were set on.
+		_fit_keyframes(clip, delta, new_length);
 		next.clips.write[member] = clip;
 	}
 	_commit(TTR("Trim Clip Start"), next);
@@ -909,6 +941,7 @@ bool TetraVideoProject::trim_clip_end(int p_id, int p_frame) {
 		Clip clip = next.clips[member];
 		clip.out += delta;
 		_clamp_fades(clip);
+		_fit_keyframes(clip, 0, clip.length());
 		next.clips.write[member] = clip;
 	}
 	_commit(TTR("Trim Clip End"), next);
@@ -1439,6 +1472,7 @@ TypedArray<Dictionary> TetraVideoProject::get_clip_effects(int p_clip_id) const 
 		d["service"] = effect.service;
 		d["values"] = effect.values.duplicate(true);
 		d["enabled"] = effect.enabled;
+		d["keyframes"] = _effect_keyframes_to_dictionary(effect);
 		result.push_back(d);
 	}
 	return result;
@@ -1804,6 +1838,24 @@ void TetraVideoProject::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_clip_effect_count", "clip_id"), &TetraVideoProject::get_clip_effect_count);
 	ClassDB::bind_method(D_METHOD("get_clip_effects", "clip_id"), &TetraVideoProject::get_clip_effects);
 
+	ClassDB::bind_method(D_METHOD("is_effect_param_animatable", "clip_id", "index", "param"), &TetraVideoProject::is_effect_param_animatable);
+	ClassDB::bind_method(D_METHOD("has_effect_keyframes", "clip_id", "index", "param"), &TetraVideoProject::has_effect_keyframes);
+	ClassDB::bind_method(D_METHOD("get_effect_keyframe_params", "clip_id", "index"), &TetraVideoProject::get_effect_keyframe_params);
+	ClassDB::bind_method(D_METHOD("get_effect_keyframes", "clip_id", "index", "param"), &TetraVideoProject::get_effect_keyframes);
+	ClassDB::bind_method(D_METHOD("add_effect_keyframe", "clip_id", "index", "param", "frame", "value", "type"), &TetraVideoProject::add_effect_keyframe, DEFVAL(Variant()), DEFVAL(-1));
+	ClassDB::bind_method(D_METHOD("remove_effect_keyframe", "clip_id", "index", "param", "frame"), &TetraVideoProject::remove_effect_keyframe);
+	ClassDB::bind_method(D_METHOD("move_effect_keyframe", "clip_id", "index", "param", "from", "to"), &TetraVideoProject::move_effect_keyframe);
+	ClassDB::bind_method(D_METHOD("set_effect_keyframe_value", "clip_id", "index", "param", "frame", "value"), &TetraVideoProject::set_effect_keyframe_value);
+	ClassDB::bind_method(D_METHOD("set_effect_keyframe_type", "clip_id", "index", "param", "frame", "type"), &TetraVideoProject::set_effect_keyframe_type);
+	ClassDB::bind_method(D_METHOD("clear_effect_keyframes", "clip_id", "index", "param", "frame"), &TetraVideoProject::clear_effect_keyframes, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("get_effect_value_at", "clip_id", "index", "param", "frame"), &TetraVideoProject::get_effect_value_at);
+	ClassDB::bind_method(D_METHOD("clip_has_keyframes", "clip_id"), &TetraVideoProject::clip_has_keyframes);
+	ClassDB::bind_static_method("TetraVideoProject", D_METHOD("keyframes_value_at", "keyframes", "frame"), &TetraVideoProject::keyframes_value_at);
+	ClassDB::bind_static_method("TetraVideoProject", D_METHOD("keyframes_to_mlt", "keyframes", "factor", "integer"), &TetraVideoProject::keyframes_to_mlt, DEFVAL(1.0), DEFVAL(false));
+	ClassDB::bind_static_method("TetraVideoProject", D_METHOD("keyframes_from_mlt", "text", "factor", "fps"), &TetraVideoProject::keyframes_from_mlt, DEFVAL(1.0), DEFVAL(25.0));
+	ClassDB::bind_static_method("TetraVideoProject", D_METHOD("get_keyframe_type_name", "type"), &TetraVideoProject::get_keyframe_type_name);
+	ClassDB::bind_static_method("TetraVideoProject", D_METHOD("get_keyframe_type_marker", "type"), &TetraVideoProject::get_keyframe_type_marker);
+
 	ClassDB::bind_method(D_METHOD("add_marker", "frame", "text"), &TetraVideoProject::add_marker, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("remove_marker", "frame"), &TetraVideoProject::remove_marker);
 	ClassDB::bind_method(D_METHOD("move_marker", "from", "to"), &TetraVideoProject::move_marker);
@@ -1850,6 +1902,42 @@ void TetraVideoProject::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("changed"));
 	ADD_SIGNAL(MethodInfo("structure_changed"));
 
+	BIND_ENUM_CONSTANT(KEYFRAME_DISCRETE);
+	BIND_ENUM_CONSTANT(KEYFRAME_LINEAR);
+	BIND_ENUM_CONSTANT(KEYFRAME_SMOOTH);
+	BIND_ENUM_CONSTANT(KEYFRAME_SMOOTH_NATURAL);
+	BIND_ENUM_CONSTANT(KEYFRAME_SMOOTH_TIGHT);
+	BIND_ENUM_CONSTANT(KEYFRAME_SINUSOIDAL_IN);
+	BIND_ENUM_CONSTANT(KEYFRAME_SINUSOIDAL_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_SINUSOIDAL_IN_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_QUADRATIC_IN);
+	BIND_ENUM_CONSTANT(KEYFRAME_QUADRATIC_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_QUADRATIC_IN_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_CUBIC_IN);
+	BIND_ENUM_CONSTANT(KEYFRAME_CUBIC_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_CUBIC_IN_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_QUARTIC_IN);
+	BIND_ENUM_CONSTANT(KEYFRAME_QUARTIC_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_QUARTIC_IN_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_QUINTIC_IN);
+	BIND_ENUM_CONSTANT(KEYFRAME_QUINTIC_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_QUINTIC_IN_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_EXPONENTIAL_IN);
+	BIND_ENUM_CONSTANT(KEYFRAME_EXPONENTIAL_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_EXPONENTIAL_IN_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_CIRCULAR_IN);
+	BIND_ENUM_CONSTANT(KEYFRAME_CIRCULAR_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_CIRCULAR_IN_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_BACK_IN);
+	BIND_ENUM_CONSTANT(KEYFRAME_BACK_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_BACK_IN_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_ELASTIC_IN);
+	BIND_ENUM_CONSTANT(KEYFRAME_ELASTIC_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_ELASTIC_IN_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_BOUNCE_IN);
+	BIND_ENUM_CONSTANT(KEYFRAME_BOUNCE_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_BOUNCE_IN_OUT);
+	BIND_ENUM_CONSTANT(KEYFRAME_TYPE_MAX);
 	BIND_ENUM_CONSTANT(CLIP_VIDEO);
 	BIND_ENUM_CONSTANT(CLIP_AUDIO);
 	BIND_ENUM_CONSTANT(CLIP_IMAGE);

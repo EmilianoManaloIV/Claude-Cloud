@@ -156,7 +156,7 @@ remove_clip_effect(clip_id, index) / move_clip_effect(clip_id, from, to) -> bool
 set_clip_effect_enabled(clip_id, index, enabled) -> bool
 set_clip_effect_values(clip_id, index, values) / set_clip_effect_value(clip_id, index, name, value) -> bool
 get_clip_effect_count(clip_id) -> int
-get_clip_effects(clip_id) -> Array of { operation, service, values, enabled }
+get_clip_effects(clip_id) -> Array of { operation, service, values, enabled, keyframes }
 
 add_marker(frame, text = "") -> bool      # one per frame; adding again retitles
 remove_marker(frame) / move_marker(from, to) -> bool      has_marker(frame) -> bool
@@ -167,6 +167,76 @@ get_markers() -> Array of { frame, text }  # sorted
 *display* values of the schema. The XML writer converts them with
 `TetraVideoAssets` (factor, colour notation, switches). An empty
 `operation_id` means `"mlt:<service>"`.
+
+### Keyframes
+
+A numeric parameter that MLT can animate (`"animatable": true` in the
+operation schema) is either a constant, its entry in `values`, or it follows a
+keyframe track. A keyframe is `{ frame, value, type }`: `frame` counts from the
+start of the clip (0 .. length - 1), `value` is in the parameter's display
+units like the constant, and `type` (`KeyframeType`) governs the stretch from
+that keyframe to the next. Before the first and after the last keyframe the
+value holds. `keyframes` of an effect is `{ param: [keyframe, ...] }`, sorted
+by frame, with entries only for animated parameters.
+
+```
+is_effect_param_animatable(clip_id, index, param) -> bool
+has_effect_keyframes(clip_id, index, param) -> bool       clip_has_keyframes(clip_id) -> bool
+get_effect_keyframe_params(clip_id, index) -> PackedStringArray
+get_effect_keyframes(clip_id, index, param) -> Array of { frame, value, type }
+add_effect_keyframe(clip_id, index, param, frame, value = null, type = -1) -> bool
+remove_effect_keyframe(clip_id, index, param, frame) -> bool
+move_effect_keyframe(clip_id, index, param, from, to) -> bool
+set_effect_keyframe_value(clip_id, index, param, frame, value) -> bool
+set_effect_keyframe_type(clip_id, index, param, frame, type) -> bool
+clear_effect_keyframes(clip_id, index, param, frame = 0) -> bool
+get_effect_value_at(clip_id, index, param, frame) -> float
+
+static keyframes_value_at(keyframes, frame) -> float
+static keyframes_to_mlt(keyframes, factor = 1.0, integer = false) -> String
+static keyframes_from_mlt(text, factor = 1.0, fps = 25.0) -> Array      # [] when not a numeric animation
+static get_keyframe_type_name(type) -> String      static get_keyframe_type_marker(type) -> String
+```
+
+- `add_effect_keyframe` on a constant parameter starts its animation. Without
+  a value the keyframe takes the value the parameter has at that frame;
+  without a type, the type of the keyframe before it. On a frame that already
+  has a keyframe it changes that keyframe. Only animatable parameters accept
+  keyframes, only inside the clip.
+- `move_effect_keyframe` refuses a frame outside the clip or one that already
+  has a keyframe.
+- `clear_effect_keyframes` makes the parameter a constant again, with the
+  value it had `frame` frames into the clip. Removing the only keyframe does
+  the same with that keyframe's value.
+- `get_effect_value_at` and `keyframes_value_at` are MLT's own interpolation
+  (`mlt_animation.c`), type for type; the test compares them with the numbers
+  libmlt returns and with rendered frames.
+- `KeyframeType` has MLT's 35 types with MLT's numbering: `KEYFRAME_DISCRETE`
+  (0), `KEYFRAME_LINEAR`, `KEYFRAME_SMOOTH` (Catmull-Rom, MLT's `~=`),
+  `KEYFRAME_SMOOTH_NATURAL`, `KEYFRAME_SMOOTH_TIGHT`, then `_IN`, `_OUT` and
+  `_IN_OUT` of `KEYFRAME_SINUSOIDAL`, `QUADRATIC`, `CUBIC`, `QUARTIC`,
+  `QUINTIC`, `EXPONENTIAL`, `CIRCULAR`, `BACK`, `ELASTIC` and `BOUNCE`;
+  `KEYFRAME_TYPE_MAX` is 35. The installed MLT 7.22 parses all of them.
+- Every edit is one undo step and refused on a locked track.
+  `check_consistency()` covers the tracks (inside the clip, strictly
+  ascending, known type, finite value).
+
+What clip edits do to keyframes, as in Kdenlive:
+
+- `split_clip`, `split_all_at`, `lift_range`, `extract_range`: each part
+  keeps the keyframes inside it, shifted to its own start, and gets a
+  keyframe with the interpolated value on the frame at the cut (the last
+  frame of the left part, the first of the right part) unless one is there.
+- `trim_clip_start`: keyframes stay on the source frames they were set on, so
+  their clip-relative frames shift. Those that fall before the new start are
+  dropped behind a keyframe with the interpolated value on the new first
+  frame. `trim_clip_end` drops those beyond the new end the same way.
+  Growing a clip again does not bring dropped keyframes back (undo does).
+- A new frame rate (`set_profile`) rescales keyframe frames with the clip.
+
+A keyframe put on a cut continues a linear or discrete stretch exactly. In a
+curved stretch (smooth or eased) the curve restarts at the new keyframe, so
+the motion near the cut changes slightly; Kdenlive behaves the same way.
 
 ### Queries
 
@@ -204,14 +274,25 @@ is_foreign() -> bool     # loaded from another program's MLT XML; false again af
 static value_to_mlt(value) -> String
 ```
 
+An animated parameter is written as an MLT animation string,
+`frame=value;frame~=value;...`, each value converted like a constant (divided
+by `factor`, rounded for integer parameters) and the type as MLT's marker
+between frame and `=` (none for linear, `|` discrete, `~` smooth, `$`, `-`,
+then `a`..`z`, `A`..`D` for the easing types). The exact display values are
+also kept in `tetra:keyframes`, which is what a reload reads, so the round
+trip is exact. In a file from another program, animation strings of
+animatable numeric parameters become keyframe tracks (frames or clock times;
+values in MLT's units, since such effects load as `mlt:` operations).
+
 `to_mlt_xml` writes a complete, deterministic MLT document: profile, a black
 background track as long as the project, one producer per timeline clip
 (`avformat`, `color`, `pixbuf`/`qimage`, `pango`/`qtext`), one playlist per
 track with blanks for gaps, and a tractor with an always-active `mix`
 transition for every audio track and an always-active compositing transition
 for every video track, all onto the background track (Kdenlive's layout).
-Clip effects are filters on the playlist entry, so their animations are
-clip-relative; fades are `brightness` (level on the lowest video track, alpha
+Clip effects are filters on the playlist entry with the clip's `in`/`out`.
+MLT hands such a filter source frame numbers and subtracts the filter's `in`,
+so animations count from the start of the clip however it was trimmed; fades are `brightness` (level on the lowest video track, alpha
 above it) and `volume` filters with MLT animation strings.
 
 Options: `compositing` (default: first available of `frei0r.cairoblend`,
@@ -315,8 +396,8 @@ get_effects(available_only = true, width = 1920, height = 1080) -> Array[Diction
 get_transitions(available_only = true, width = 1920, height = 1080) -> Array[Dictionary]
 get_operation(id, width = 1920, height = 1080) -> Dictionary
 get_default_values(operation) -> Dictionary
-values_to_mlt_properties(operation, values) -> Dictionary          # name -> String, as MLT expects
-effect_to_mlt_properties(operation_id, values, width, height, length) -> Dictionary
+values_to_mlt_properties(operation, values, keyframes = {}) -> Dictionary          # name -> String, as MLT expects
+effect_to_mlt_properties(operation_id, values, width, height, length, keyframes = {}) -> Dictionary
 clear_cache()
 ```
 
@@ -330,11 +411,17 @@ that Kdenlive does not describe but that have MLT metadata are appended as
 `Audio` / `Misc`; transitions are `Transitions`). `width`/`height` resolve
 Kdenlive's `%width`, `%maxWidth`... placeholders; pass the project's size.
 
+`keyframes` is `{ param: [{ frame, value, type }] }` as
+`TetraVideoProject.get_clip_effects()` gives it: those parameters are sent as
+MLT animation strings instead of their constant. Numeric parameters of
+`mlt:` operations whose MLT metadata says `animation: yes` are `animatable`
+too. Rectangles, colours and other non-numeric animated types are not.
+
 Parameter mapping (Kdenlive type → schema type, kept in `kdenlive_type`):
 
 | Kdenlive | Schema | Notes |
 | --- | --- | --- |
-| constant, double, animated, keyframe, simplekeyframe, integer, float, colorwheel | `int` / `float` | display units: `min`/`max` as written, `default` × `factor`; `factor`, `step`, `unit`; `animated: true` for keyframable ones (edited as a constant for now) |
+| constant, double, animated, keyframe, simplekeyframe, integer, float, colorwheel | `int` / `float` | display units: `min`/`max` as written, `default` × `factor`; `factor`, `step`, `unit`; `animated: true` and `animatable: true` for animated, keyframe and simplekeyframe (see Keyframes) |
 | bool | `bool` | sent as `1`/`0` |
 | switch | `bool` | `switch_on` / `switch_off` hold the strings sent |
 | list, listdependency | `enum` | `paramlist` + `paramlistdisplay` |
@@ -470,6 +557,24 @@ What the user can do:
   to that clip. **Effect Stack** lists the selected clip's effects with
   enable, move up/down, remove and a `TetraParamPanel`; rapid parameter
   changes become one undo step.
+- **Keyframes** — each animatable parameter of the selected effect has a row
+  between the list and the form: a diamond toggle with the parameter's name
+  (off: constant; on: the parameter follows keyframes, the first one on the
+  clip's first frame), and while it is on, buttons for the previous keyframe,
+  add or remove a keyframe at the playhead, the next keyframe, and a selector
+  with the interpolation type of the stretch under the playhead (it sets the
+  type of the keyframe that stretch starts at). The parameter's control in the
+  form then shows the value at the playhead and follows it; changing it sets
+  the keyframe at the playhead or makes one there (auto-key). Switching the
+  toggle off keeps the value at the playhead as the constant. Above the rows,
+  a strip shows the clip's time with one lane per animated parameter of the
+  clip (all its effects): a square for a discrete keyframe, a diamond for a
+  linear one, a circle for curved types, and the playhead as a red line. A
+  click on a keyframe selects it and moves the playhead there, a click
+  elsewhere on a lane moves the playhead, a drag moves the keyframe in time
+  (one undo step; it stops at other keyframes' frames and at the clip's
+  ends), Delete or Backspace removes the selected one. On the timeline a clip
+  with keyframes shows small diamonds along its bottom edge.
 - **Menus** — Project: New, Open..., Save, Save As..., Project Settings...
   (preset, size, frame rate), Render.... Edit: Undo, Redo, Delete, Ripple
   Delete, Select All. Timeline: Add Video/Audio Track, Delete Track (the
@@ -551,6 +656,18 @@ TetraVideoBin (VBoxContainer)
 TetraVideoEffectStack (VBoxContainer)
   set_clip(clip_id) get_clip() select_effect(index) get_selected_effect() get_effect_count()
   get_param_panel() -> TetraParamPanel    commit_pending()
+  set_playhead(timeline_frame) get_playhead() get_frame_in_clip()      # the workspace keeps it on the monitor's frame
+  get_animatable_params() -> PackedStringArray   set_param_animated(name, on) -> bool   is_param_animated(name)
+  get_keyframe_control(name, "toggle" | "previous" | "key" | "next" | "type") -> Control
+  get_keyframe_strip() -> TetraVideoKeyframeStrip
+  signal seek_requested(timeline_frame)
+
+TetraVideoKeyframeStrip (Control)        # frames count from the clip start
+  set_playhead(frame) get_playhead() refresh()
+  get_lane_count() get_lane_effect(lane) get_lane_param(lane) get_lane_label(lane) get_lane_frames(lane)
+  get_keyframe_position(lane, frame) -> Vector2    get_frame_at(x) -> int
+  select_keyframe(lane, frame) get_selected_lane() get_selected_frame() delete_selected() -> bool
+  signals: seek_requested(frame) keyframe_selected(effect, param, frame) edit_started()
 
 TetraVideoRenderDialog (ConfirmationDialog)
   popup_render(project, zone_in = -1, zone_out = -1)
@@ -569,6 +686,7 @@ The UI is verified inside the running editor by screenshot drivers in
 ```sh
 scripts/screenshot.sh build/screens/video-checks.png  Video res://tetra_video/shots/checks.gd          # prints "N checks, M failed"
 scripts/screenshot.sh build/screens/video-safety.png  Video res://tetra_video/shots/safety_checks.gd   # prints "N checks, M failed"
+scripts/screenshot.sh build/screens/video-keyframes.png Video res://tetra_video/shots/keyframes.gd      # prints "N checks, M failed"
 scripts/screenshot.sh build/screens/video-editing.png Video res://tetra_video/shots/editing.gd
 scripts/screenshot.sh build/screens/video-render.png  Video res://tetra_video/shots/render_dialog.gd
 scripts/screenshot.sh build/screens/video-effects.png Video res://tetra_video/shots/effects_browser.gd
@@ -590,7 +708,10 @@ clips, undo exactness over random operation sequences), `test_xml_engine.gd`
 engine, effects, fades, stills, titles, thumbnails, `melt` accepting the
 file), `test_playback.gd` (real-time playback, reverse, loop, sound),
 `test_assets.gd` (catalog and value conversion), `test_render.gd` (presets
-and renders checked with `ffprobe`) and `test_safety.gd` (failed saves keep
+and renders checked with `ffprobe`), `test_keyframes.gd` (every
+interpolation type against MLT's formulas and libmlt's own numbers, the
+animation string, the keyframe API with undo, cuts and trims, the project
+file, and a brightness ramp rendered by the engine) and `test_safety.gd` (failed saves keep
 the file, frame-rate changes, track uids, scaled renders of pixel-valued
 effects, renders onto source files). Frames they render are saved as
 `build/screens/video-*.png`.

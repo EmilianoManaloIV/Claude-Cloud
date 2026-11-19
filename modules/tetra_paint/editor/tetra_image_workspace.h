@@ -201,6 +201,7 @@ private:
 	ConfirmationDialog *discard_dialog = nullptr;
 	Callable discard_action;
 	ConfirmationDialog *save_choice_dialog = nullptr;
+	AcceptDialog *import_warnings_dialog = nullptr;
 
 	AcceptDialog *search_dialog = nullptr;
 	TetraOperationBrowser *operation_browser = nullptr;
@@ -311,7 +312,7 @@ public:
 	static TetraImageWorkspace *get_singleton() { return singleton; }
 
 	// The file an image resource was loaded from, when the workspace can edit
-	// it (png, jpg, jpeg, webp, exr, tga, bmp, ora); empty otherwise.
+	// it (png, jpg, jpeg, webp, exr, tga, bmp, ora, xcf); empty otherwise.
 	static String get_editable_path(Object *p_object);
 
 	// p_fill is a display (sRGB) colour; alpha 0 gives a transparent image.

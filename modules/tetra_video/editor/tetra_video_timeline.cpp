@@ -160,6 +160,18 @@ void TetraVideoTimeline::_ensure_clips() const {
 		clip.fade_in = payload["fade_in"];
 		clip.fade_out = payload["fade_out"];
 		clip.effect_count = Array(payload["effects"]).size();
+		for (const Variant &effect : Array(payload["effects"])) {
+			const Dictionary keyframes = Dictionary(effect).get("keyframes", Dictionary());
+			for (const KeyValue<Variant, Variant> &track : keyframes) {
+				for (const Variant &key : Array(track.value)) {
+					const int frame = Dictionary(key)["frame"];
+					if (!clip.keyframes.has(frame)) {
+						clip.keyframes.push_back(frame);
+					}
+				}
+			}
+		}
+		clip.keyframes.sort();
 		if (!bin_clips.has(clip.bin_id)) {
 			bin_clips[clip.bin_id] = project->get_bin_clip(clip.bin_id);
 		}
@@ -808,6 +820,22 @@ void TetraVideoTimeline::_draw_timeline() {
 			const Point2 corner = rect.position + Point2(rect.size.x, 0);
 			draw_colored_polygon({ corner, corner + Point2(0, rect.size.y), corner + Point2(-width, 0) }, Color(0, 0, 0, 0.4));
 		}
+		// Keyframes of animated effect parameters: a row of small diamonds along the bottom edge.
+		if (!clip.keyframes.is_empty() && rect.size.y > 24 * EDSCALE) {
+			const real_t r = Math::round(3 * EDSCALE);
+			const real_t y = rect.position.y + rect.size.y - r - 2 * EDSCALE;
+			real_t last_x = -1e9;
+			for (int frame : clip.keyframes) {
+				const real_t x = Math::round(rect.position.x + (frame + 0.5) * zoom);
+				// When zoomed far out, marks that would pile up are left out.
+				if (x - last_x < r) {
+					continue;
+				}
+				last_x = x;
+				draw_colored_polygon({ Point2(x, y - r), Point2(x + r, y), Point2(x, y + r), Point2(x - r, y) }, Color(0.08, 0.08, 0.1, 0.85));
+				draw_colored_polygon({ Point2(x, y - r + EDSCALE), Point2(x + r - EDSCALE, y), Point2(x, y + r - EDSCALE), Point2(x - r + EDSCALE, y) }, MARKER_COLOR);
+			}
+		}
 		// A badge for clips that carry effects.
 		if (clip.effect_count > 0 && rect.size.x > 46 * EDSCALE) {
 			const String badge = clip.effect_count > 1 ? vformat("fx %d", clip.effect_count) : String("fx");
@@ -1247,6 +1275,9 @@ String TetraVideoTimeline::get_tooltip(const Point2 &p_pos) const {
 	String text = clip->name + "\n" + vformat(TTR("Position %s, duration %s"), TetraVideoTimecode::from_frames(clip->position, fps), TetraVideoTimecode::from_frames(clip->length, fps));
 	if (clip->effect_count > 0) {
 		text += "\n" + vformat(TTR("%d effect(s)"), clip->effect_count);
+		if (!clip->keyframes.is_empty()) {
+			text += ", " + vformat(TTR("%d keyframe time(s)"), clip->keyframes.size());
+		}
 	}
 	return text;
 }

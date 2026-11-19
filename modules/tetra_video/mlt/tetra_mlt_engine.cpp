@@ -262,6 +262,9 @@ Dictionary _metadata_parameter(Mlt::Properties &p_parameter) {
 	}
 	if (_text(p_parameter, "animation") == "yes") {
 		param["animated"] = true;
+		if (type == "int" || type == "float") {
+			param["animatable"] = true;
+		}
 	}
 	return param;
 }

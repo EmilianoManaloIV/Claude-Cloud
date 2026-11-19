@@ -2,7 +2,7 @@
 
 Tetra's GIMP: a layered raster document with GIMP's layer modes, selections,
 paint tools, fills, transforms, colour operations and filters, the GEGL filter
-bridge and OpenRaster file support, and the **Image** main screen of the
+bridge, OpenRaster file support and GIMP XCF import, and the **Image** main screen of the
 editor built on it (see [Workspace](#workspace)). The workspace drives the
 engine through the ClassDB API described here, and so do the headless tests in
 `tests/godot/project/tetra_paint/`.
@@ -11,12 +11,14 @@ engine through the ClassDB API described here, and so do the headless tests in
 | --- | --- | --- |
 | `TetraImageDocument` (RefCounted) | `tetra_image_document.h` | One open image: layers, selection, undo history and every edit. |
 | `TetraGegl` (static methods only) | `gegl/tetra_gegl.h` | GEGL operations found by introspection, applied to images. |
-| `TetraImageLoaderORA` (not in ClassDB) | `tetra_ora_loader.h` | `ImageFormatLoader` for `.ora`, so layered files import as textures. |
+| `TetraImageLoaderORA`, `TetraImageLoaderXCF` (not in ClassDB) | `tetra_ora_loader.h` | `ImageFormatLoader`s for `.ora` and `.xcf`, so layered files import as textures. |
+| `tetra_xcf_read()` (not in ClassDB) | `tetra_xcf_reader.h` | The XCF reader behind `load()`: file to canvas-sized layers, selection and warnings. |
 
 Source layout: `tetra_image_document.cpp` (layers, compositing, undo),
 `tetra_image_selection.cpp`, `tetra_image_paint.cpp`, `tetra_image_edit.cpp`
 (fills, transforms), `tetra_image_operations.cpp` (native operations),
-`tetra_image_io.cpp` (load, OpenRaster, export), `tetra_layer_modes.cpp`
+`tetra_image_io.cpp` (load, OpenRaster, export), `tetra_xcf_reader.cpp`
+(GIMP XCF import), `tetra_layer_modes.cpp`
 (GIMP's layer-mode maths), `tetra_paint_utils.*` (thread-pool loops, sRGB,
 Gaussian blur), `gegl/tetra_gegl.cpp`.
 
@@ -288,7 +290,9 @@ hue-saturation has the master range only.
 ### Files
 
 ```
-load(path) -> Error            # .ora with all layers, or any image Godot loads as one layer named after the file
+load(path) -> Error            # .ora or .xcf with all layers, or any image Godot loads as one layer named after the file
+load_xcf_buffer(data: PackedByteArray) -> Error   # an XCF file held in memory; prints nothing when it is unreadable
+get_load_warnings() -> PackedStringArray          # what the last load could not keep (XCF only; empty otherwise)
 save_ora(path) -> Error        # OpenRaster; written to "<path>.tmp" and renamed, so a failed save keeps the old file
 export_image(path, quality = 0.9) -> Error   # flattened; by extension: png, jpg/jpeg (on white), webp (lossless at quality 1), exr (linear float)
 ```
@@ -306,7 +310,56 @@ A failed `load` leaves the document unchanged.
 
 `.ora` files are also plain images for Godot (`Image.load_from_file`, the
 texture importer): the loader returns `mergedimage.png`, or composites the
-layers when it is missing.
+layers when it is missing. `.xcf` files are images too: the loader returns the
+composite of the visible layers.
+
+### XCF import
+
+`load()` reads GIMP's native format, every file version GIMP 3.2.8 reads (0
+to 26; a newer version is refused with `ERR_FILE_UNRECOGNIZED`). There is no
+XCF export: save as OpenRaster.
+
+What is read:
+
+- 32-bit offsets and, from version 11, 64-bit offsets; RGB, greyscale and
+  indexed images (through the colormap; version 0 colormaps become GIMP's grey
+  ramp); layers with and without alpha (without: opaque inside the layer).
+- All precisions: 8, 16 and 32-bit integer, 16, 32 and 64-bit float, in the
+  version 4, 5-6 and 7+ numberings. Linear data is taken as it is;
+  non-linear and perceptual data goes through the sRGB curve. Float values
+  outside 0..1 are kept, NaN and infinities become 0, alpha is clamped.
+  Before version 12 GIMP stored wide samples in the writing machine's byte
+  order; little-endian is assumed (and reported).
+- Uncompressed, RLE and zlib tiles in the hierarchy / level / 64 x 64 tile
+  structure. Only the tiles that touch the canvas are read.
+- Per layer: name, visibility, opacity (`PROP_OPACITY` and
+  `PROP_FLOAT_OPACITY`), lock alpha, mode, offsets and size. The selected
+  layer becomes the active one (the topmost, if several are selected).
+- The selection channel becomes the selection.
+
+What changes, each reported once per file in `get_load_warnings()` (layers
+are named top first, at most four per warning):
+
+| In the file | In the document |
+| --- | --- |
+| Layer offset and size | Layers are canvas-sized: the layer is placed at its offset and **what lies outside the canvas is cut off**. |
+| Layer mask | With "apply mask" on, multiplied into the layer's alpha; otherwise left out. The mask itself is not kept. |
+| Layer group | Dissolved: the children take its place in the stack, with the group's opacity multiplied in, hidden if the group is hidden, and cut by the group's mask. Children then blend with everything below, not within the group; the group's own mode (pass through or any other) is dropped. |
+| Layer mode | `GimpLayerMode` number to the mode of the same name. Legacy modes (GIMP 2.8 and older files) map to the current mode of that name, which blends in another colour space; old Overlay (5) is Soft light, as GIMP reads it. Pass through (on a layer), Replace, Overwrite, Anti erase and unknown numbers become Normal. |
+| Explicit blend space, composite space, composite mode | Dropped; the mode's defaults apply. |
+| Text, vector and link layers | Their stored pixels. |
+| Floating selection | A layer right above the layer it floats on (dropped if it floats on a channel or mask). |
+| Layer effects, saved channels, paths, guides, resolution, colour profile, parasites | Not imported (resolution, guides and parasites silently). Colours are taken as sRGB. |
+| A layer that cannot be read | Left out, as GIMP does; the load fails only if no layer is readable. |
+
+The reader (`tetra_xcf_reader.cpp`) checks every offset, size, string length
+and tile length against the file, skips unknown properties by their size,
+limits group nesting to 64 levels and a file to 16384 layers, and decodes
+straight into canvas-sized buffers, so a layer that claims to be
+500000 x 500000 costs nothing. Images for which `is_size_supported()` is false
+give `ERR_OUT_OF_MEMORY` before anything is allocated, as does a file whose
+layers together need more than half of the available memory (at least 2 GiB
+are allowed). A failed load leaves the document unchanged.
 
 ## TetraGegl
 
@@ -419,9 +472,15 @@ selection; to commit it through the selection use `apply_operation` instead.
 ### What the user can do
 
 - **Start**: the welcome page offers New Image... and Open...; double-clicking
-  a png, jpg, jpeg, webp, exr, tga, bmp or ora file in the FileSystem dock
+  a png, jpg, jpeg, webp, exr, tga, bmp, ora or xcf file in the FileSystem dock
   opens it here (the plugin `handles()` `Texture2D` and `Image` resources
   whose file has one of these extensions).
+- **GIMP files**: a `.xcf` opens from File > Open (its own filter, "GIMP
+  image (import)") or from the FileSystem dock with all its layers and its
+  selection. An "Imported with Changes" dialog then lists, once, what the
+  document could not keep (see [XCF import](#xcf-import)). The file is never
+  written back: Save tells so in the status bar and opens Save Image with
+  `<name>.ora` proposed; after that the document is the `.ora`.
 - **Canvas**: wheel zooms about the pointer, middle-drag or Space+drag pans.
   The composite is shown through 256 px textures; an edit re-composites its
   rectangle once per frame and uploads only the tiles it touches. Above
@@ -587,8 +646,14 @@ else works. OpenRaster reading and writing uses the engine's bundled minizip.
 
 `scripts/test.sh tetra_paint` runs `test_document.gd` (layers, modes,
 compositing, undo), `test_selection.gd`, `test_paint.gd`, `test_edit.gd`
-(fills, gradients, transforms), `test_operations.gd`, `test_gegl.gd` and
-`test_files.gd`. They also write `build/screens/paint-layer-modes.png`,
+(fills, gradients, transforms), `test_operations.gd`, `test_gegl.gd`,
+`test_files.gd` and `test_xcf.gd`. The last one loads the real `.xcf` files
+of the checkout (GIMP's `gimp-2-6-file.xcf`, Blender's `splash_template.xcf`;
+composites in `build/screens/xcf-*.png`), checks exact pixels of files made by
+its own minimal XCF writer (versions 0 to 26, every precision, the three
+compressions, hand-written RLE packets, greyscale, indexed, offsets, modes,
+groups, masks, floating selection, selection) and feeds the reader about
+78000 truncated and randomly changed files. They also write `build/screens/paint-layer-modes.png`,
 `paint-strokes.png`, `paint-gradients.png` and `paint-gegl.png`.
 
 The workspace classes exist only inside the running editor, so their
@@ -613,4 +678,8 @@ scripts/screenshot.sh build/screens/image-workspace.png Image res://tetra_paint/
 scripts/screenshot.sh build/screens/image-filter-dialog.png Image res://tetra_paint/shots/workspace_filter_dialog.gd
 scripts/screenshot.sh build/screens/image-selection-menu.png Image res://tetra_paint/shots/workspace_selection_menu.gd
 scripts/screenshot.sh build/screens/image-zoom.png Image res://tetra_paint/shots/workspace_zoom.gd
+scripts/screenshot.sh build/screens/image-xcf-import.png Image res://tetra_paint/shots/workspace_xcf.gd
 ```
+
+The last one also checks XCF import in the workspace and prints
+`screenshot xcf import checks: <n> checks, <m> failed`.

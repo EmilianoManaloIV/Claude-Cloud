@@ -31,12 +31,69 @@ public:
 		TRACK_AUDIO,
 	};
 
+	// How a value travels from one keyframe to the next. The numbers are MLT's mlt_keyframe_type.
+	enum KeyframeType {
+		KEYFRAME_DISCRETE,
+		KEYFRAME_LINEAR,
+		KEYFRAME_SMOOTH,
+		KEYFRAME_SMOOTH_NATURAL,
+		KEYFRAME_SMOOTH_TIGHT,
+		KEYFRAME_SINUSOIDAL_IN,
+		KEYFRAME_SINUSOIDAL_OUT,
+		KEYFRAME_SINUSOIDAL_IN_OUT,
+		KEYFRAME_QUADRATIC_IN,
+		KEYFRAME_QUADRATIC_OUT,
+		KEYFRAME_QUADRATIC_IN_OUT,
+		KEYFRAME_CUBIC_IN,
+		KEYFRAME_CUBIC_OUT,
+		KEYFRAME_CUBIC_IN_OUT,
+		KEYFRAME_QUARTIC_IN,
+		KEYFRAME_QUARTIC_OUT,
+		KEYFRAME_QUARTIC_IN_OUT,
+		KEYFRAME_QUINTIC_IN,
+		KEYFRAME_QUINTIC_OUT,
+		KEYFRAME_QUINTIC_IN_OUT,
+		KEYFRAME_EXPONENTIAL_IN,
+		KEYFRAME_EXPONENTIAL_OUT,
+		KEYFRAME_EXPONENTIAL_IN_OUT,
+		KEYFRAME_CIRCULAR_IN,
+		KEYFRAME_CIRCULAR_OUT,
+		KEYFRAME_CIRCULAR_IN_OUT,
+		KEYFRAME_BACK_IN,
+		KEYFRAME_BACK_OUT,
+		KEYFRAME_BACK_IN_OUT,
+		KEYFRAME_ELASTIC_IN,
+		KEYFRAME_ELASTIC_OUT,
+		KEYFRAME_ELASTIC_IN_OUT,
+		KEYFRAME_BOUNCE_IN,
+		KEYFRAME_BOUNCE_OUT,
+		KEYFRAME_BOUNCE_IN_OUT,
+		KEYFRAME_TYPE_MAX,
+	};
+
 private:
+	struct Keyframe {
+		// Frames from the start of the clip.
+		int frame = 0;
+		// In the parameter's display units, like the constant values.
+		double value = 0.0;
+		// Governs the stretch from this keyframe to the next one.
+		KeyframeType type = KEYFRAME_LINEAR;
+	};
+
+	// The keyframes of one animated parameter, ordered by frame, never empty.
+	struct KeyframeTrack {
+		String param;
+		Vector<Keyframe> keys;
+	};
+
 	struct Effect {
 		String operation;
 		String service;
 		Dictionary values;
 		bool enabled = true;
+		// Parameters that follow keyframes instead of their entry in values.
+		Vector<KeyframeTrack> keyframes;
 	};
 
 	struct BinClip {
@@ -135,6 +192,25 @@ private:
 	bool _resolve_tracks(const PackedInt32Array &p_tracks, Vector<int> &r_tracks) const;
 	bool _edit_effect(int p_clip_id, int p_index, State &r_next, int &r_clip_index) const;
 
+	// Keyframes (tetra_video_keyframes.cpp).
+	static double _keyframes_value_at(const Vector<Keyframe> &p_keys, int p_frame);
+	static int _keyframe_index(const Vector<Keyframe> &p_keys, int p_frame);
+	static int _keyframe_before(const Vector<Keyframe> &p_keys, int p_frame);
+	static String _keyframes_to_mlt(const Vector<Keyframe> &p_keys, double p_factor, bool p_integer);
+	static bool _keyframes_from_mlt(const String &p_text, double p_factor, double p_fps, Vector<Keyframe> &r_keys);
+	static Array _keyframes_to_array(const Vector<Keyframe> &p_keys);
+	static bool _keyframes_from_array(const Array &p_array, Vector<Keyframe> &r_keys);
+	static Dictionary _effect_keyframes_to_dictionary(const Effect &p_effect);
+	static void _effect_keyframes_from_dictionary(const Dictionary &p_dictionary, Effect &r_effect);
+	static int _find_keyframe_track(const Effect &p_effect, const String &p_param);
+	static void _fit_keyframes(Clip &r_clip, int p_first, int p_length);
+	static void _rescale_keyframes(Clip &r_clip, int64_t p_num, int64_t p_den);
+	static Dictionary _effect_operation(const String &p_operation, const String &p_service, int p_width, int p_height);
+	Dictionary _effect_param_schema(const Effect &p_effect, const String &p_param) const;
+	const Vector<Keyframe> *_get_keyframes(int p_clip_id, int p_index, const String &p_param) const;
+	bool _edit_keyframes(int p_clip_id, int p_index, const String &p_param, bool p_must_exist, State &r_next, int &r_clip_index, Vector<Keyframe> &r_keys);
+	void _commit_keyframes(const String &p_name, State &r_next, int p_clip_index, int p_index, const String &p_param, const Vector<Keyframe> &p_keys);
+
 	void _commit(const String &p_name, const State &p_next);
 	void _apply_state(const State &p_next);
 	bool _fail(const String &p_reason);
@@ -221,6 +297,25 @@ public:
 	int get_clip_effect_count(int p_clip_id) const;
 	TypedArray<Dictionary> get_clip_effects(int p_clip_id) const;
 
+	// Keyframes: an animatable numeric parameter of an effect can follow keyframes. Frames count from the clip start.
+	bool is_effect_param_animatable(int p_clip_id, int p_index, const String &p_param) const;
+	bool has_effect_keyframes(int p_clip_id, int p_index, const String &p_param) const;
+	PackedStringArray get_effect_keyframe_params(int p_clip_id, int p_index) const;
+	TypedArray<Dictionary> get_effect_keyframes(int p_clip_id, int p_index, const String &p_param) const;
+	bool add_effect_keyframe(int p_clip_id, int p_index, const String &p_param, int p_frame, const Variant &p_value = Variant(), int p_type = -1);
+	bool remove_effect_keyframe(int p_clip_id, int p_index, const String &p_param, int p_frame);
+	bool move_effect_keyframe(int p_clip_id, int p_index, const String &p_param, int p_from, int p_to);
+	bool set_effect_keyframe_value(int p_clip_id, int p_index, const String &p_param, int p_frame, double p_value);
+	bool set_effect_keyframe_type(int p_clip_id, int p_index, const String &p_param, int p_frame, KeyframeType p_type);
+	bool clear_effect_keyframes(int p_clip_id, int p_index, const String &p_param, int p_frame = 0);
+	double get_effect_value_at(int p_clip_id, int p_index, const String &p_param, int p_frame) const;
+	bool clip_has_keyframes(int p_clip_id) const;
+	static double keyframes_value_at(const Array &p_keyframes, int p_frame);
+	static String keyframes_to_mlt(const Array &p_keyframes, double p_factor = 1.0, bool p_integer = false);
+	static Array keyframes_from_mlt(const String &p_text, double p_factor = 1.0, double p_fps = 25.0);
+	static String get_keyframe_type_name(KeyframeType p_type);
+	static String get_keyframe_type_marker(KeyframeType p_type);
+
 	// Markers.
 	bool add_marker(int p_frame, const String &p_text = String());
 	bool remove_marker(int p_frame);
@@ -271,3 +366,4 @@ public:
 
 VARIANT_ENUM_CAST(TetraVideoProject::ClipKind);
 VARIANT_ENUM_CAST(TetraVideoProject::TrackKind);
+VARIANT_ENUM_CAST(TetraVideoProject::KeyframeType);

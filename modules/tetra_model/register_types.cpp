@@ -3,6 +3,7 @@
 #include "tetra_blender_bridge.h"
 #include "tetra_blender_mesh.h"
 #include "tetra_blender_scene.h"
+#include "tetra_edit_mesh.h"
 
 #include "core/config/project_settings.h"
 #include "core/object/class_db.h"
@@ -13,6 +14,7 @@
 #include "editor/tetra_blender_modifiers_tab.h"
 #include "editor/tetra_blender_operators_tab.h"
 #include "editor/tetra_blender_render_tab.h"
+#include "editor/tetra_mesh_edit_plugin.h"
 
 #include "editor/editor_node.h"
 #include "editor/plugins/editor_plugin.h"
@@ -34,6 +36,7 @@ void initialize_tetra_model_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_ABSTRACT_CLASS(TetraBlenderMesh);
 		GDREGISTER_CLASS(TetraBlenderBridge);
 		GDREGISTER_ABSTRACT_CLASS(TetraBlenderScene);
+		GDREGISTER_CLASS(TetraEditMesh);
 		GLOBAL_DEF(PropertyInfo(Variant::STRING, "tetra/blender/python_path", PROPERTY_HINT_GLOBAL_FILE), "");
 		TetraBlenderBridge::update_engine_registry();
 	}
@@ -49,6 +52,8 @@ void initialize_tetra_model_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_ABSTRACT_CLASS(TetraBlenderRenderTab);
 		GDREGISTER_ABSTRACT_CLASS(TetraBlenderRenderView);
 		EditorPlugins::add_by_type<TetraBlenderEditorPlugin>();
+		GDREGISTER_ABSTRACT_CLASS(TetraMeshEditPlugin);
+		EditorPlugins::add_by_type<TetraMeshEditPlugin>();
 	}
 #endif
 }

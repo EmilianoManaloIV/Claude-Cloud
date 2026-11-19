@@ -18,6 +18,7 @@
 #endif
 
 static Ref<TetraImageLoaderORA> ora_loader;
+static Ref<TetraImageLoaderXCF> xcf_loader;
 
 void initialize_tetra_paint_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
@@ -28,6 +29,8 @@ void initialize_tetra_paint_module(ModuleInitializationLevel p_level) {
 		TetraGegl::register_engine();
 		ora_loader.instantiate();
 		ImageLoader::add_image_format_loader(ora_loader);
+		xcf_loader.instantiate();
+		ImageLoader::add_image_format_loader(xcf_loader);
 	}
 #ifdef TOOLS_ENABLED
 	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
@@ -47,6 +50,8 @@ void uninitialize_tetra_paint_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
 		ImageLoader::remove_image_format_loader(ora_loader);
 		ora_loader.unref();
+		ImageLoader::remove_image_format_loader(xcf_loader);
+		xcf_loader.unref();
 		TetraGegl::shutdown();
 	}
 }

@@ -2,9 +2,11 @@
 
 #include "tetra_ora_loader.h"
 #include "tetra_paint_utils.h"
+#include "tetra_xcf_reader.h"
 
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
+#include "core/io/file_access_memory.h"
 #include "core/io/xml_parser.h"
 #include "core/io/zip_io.h"
 #include "core/object/class_db.h"
@@ -198,13 +200,89 @@ Error TetraImageDocument::_load_ora(const String &p_path) {
 	return OK;
 }
 
+// Everything is read before the document is touched, so an unreadable file
+// leaves it as it was.
+Error TetraImageDocument::_load_xcf(const Ref<FileAccess> &p_file, const String &p_what, bool p_quiet) {
+	TetraXcfImage image;
+	const Error err = tetra_xcf_read(p_file, image);
+	if (err != OK) {
+		ERR_FAIL_COND_V_MSG(!p_quiet, err, vformat("Cannot read %s as an XCF file: %s", p_what, image.error));
+		return err;
+	}
+	_reset(image.width, image.height);
+	for (TetraXcfLayer &source : image.layers) {
+		Layer layer;
+		layer.id = next_layer_id++;
+		layer.name = source.name;
+		layer.visible = source.visible;
+		layer.opacity = source.opacity;
+		layer.mode = LayerMode(source.mode);
+		layer.lock_alpha = source.lock_alpha;
+		layer.pixels = source.pixels;
+		source.pixels = Vector<float>();
+		layers.push_back(layer);
+	}
+	active_layer = layers[image.active_layer].id;
+	if (!image.selection.is_empty()) {
+		selection = image.selection;
+		selection_empty = false;
+	}
+	load_warnings = image.warnings;
+	return OK;
+}
+
+void TetraImageDocument::_loaded() {
+	_clear_history();
+	emit_signal(SNAME("size_changed"));
+	emit_signal(SNAME("layers_changed"));
+	emit_signal(SNAME("selection_changed"));
+	_mark_dirty(_canvas_rect());
+}
+
+Error TetraImageDocument::load_xcf_file(const Ref<FileAccess> &p_file, bool p_quiet) {
+	TETRA_REQUIRE_IDLE_V(ERR_BUSY);
+	ERR_FAIL_COND_V(p_file.is_null(), ERR_INVALID_PARAMETER);
+	const Error err = _load_xcf(p_file, vformat("\"%s\"", p_file->get_path()), p_quiet);
+	if (err == OK) {
+		_loaded();
+	}
+	return err;
+}
+
+Error TetraImageDocument::load_xcf_buffer(const PackedByteArray &p_data) {
+	TETRA_REQUIRE_IDLE_V(ERR_BUSY);
+	if (p_data.is_empty()) {
+		return ERR_FILE_UNRECOGNIZED;
+	}
+	Ref<FileAccessMemory> memory;
+	memory.instantiate();
+	if (memory->open_custom(p_data.ptr(), p_data.size()) != OK) {
+		return ERR_FILE_CORRUPT;
+	}
+	const Error err = _load_xcf(memory, "the data", true);
+	if (err == OK) {
+		_loaded();
+	}
+	return err;
+}
+
 Error TetraImageDocument::load(const String &p_path) {
 	TETRA_REQUIRE_IDLE_V(ERR_BUSY);
-	if (p_path.get_extension().to_lower() == "ora") {
+	const String extension = p_path.get_extension().to_lower();
+	if (extension == "xcf") {
+		Error err = OK;
+		const Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ, &err);
+		ERR_FAIL_COND_V_MSG(file.is_null(), err == OK ? ERR_FILE_CANT_OPEN : err, vformat("Cannot open \"%s\".", p_path));
+		err = _load_xcf(file, vformat("\"%s\"", p_path), false);
+		if (err != OK) {
+			return err;
+		}
+	} else if (extension == "ora") {
 		const Error err = _load_ora(p_path);
 		if (err != OK) {
 			return err;
 		}
+		load_warnings = PackedStringArray();
 	} else {
 		Ref<Image> image;
 		image.instantiate();
@@ -217,12 +295,9 @@ Error TetraImageDocument::load(const String &p_path) {
 		ERR_FAIL_COND_V(pixels.is_empty(), ERR_FILE_CORRUPT);
 		_reset(image->get_width(), image->get_height());
 		active_layer = _append_layer(p_path.get_file().get_basename(), pixels);
+		load_warnings = PackedStringArray();
 	}
-	_clear_history();
-	emit_signal(SNAME("size_changed"));
-	emit_signal(SNAME("layers_changed"));
-	emit_signal(SNAME("selection_changed"));
-	_mark_dirty(_canvas_rect());
+	_loaded();
 	return OK;
 }
 
@@ -372,8 +447,26 @@ void TetraImageLoaderORA::get_recognized_extensions(List<String> *p_extensions) 
 	p_extensions->push_back("ora");
 }
 
+Error TetraImageLoaderXCF::load_image(Ref<Image> p_image, Ref<FileAccess> p_fileaccess, BitField<ImageFormatLoader::LoaderFlags> p_flags, float p_scale) {
+	ERR_FAIL_COND_V(p_image.is_null() || p_fileaccess.is_null(), ERR_INVALID_PARAMETER);
+	Ref<TetraImageDocument> document;
+	document.instantiate();
+	const Error err = document->load_xcf_file(p_fileaccess);
+	if (err != OK) {
+		return err;
+	}
+	p_image->copy_internals_from(document->composite());
+	return OK;
+}
+
+void TetraImageLoaderXCF::get_recognized_extensions(List<String> *p_extensions) const {
+	p_extensions->push_back("xcf");
+}
+
 void TetraImageDocument::_bind_file_methods() {
 	ClassDB::bind_method(D_METHOD("load", "path"), &TetraImageDocument::load);
+	ClassDB::bind_method(D_METHOD("load_xcf_buffer", "data"), &TetraImageDocument::load_xcf_buffer);
+	ClassDB::bind_method(D_METHOD("get_load_warnings"), &TetraImageDocument::get_load_warnings);
 	ClassDB::bind_method(D_METHOD("save_ora", "path"), &TetraImageDocument::save_ora);
 	ClassDB::bind_method(D_METHOD("export_image", "path", "quality"), &TetraImageDocument::export_image, DEFVAL(0.9f));
 }
