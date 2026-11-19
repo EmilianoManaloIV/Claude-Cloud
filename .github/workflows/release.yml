@@ -11,10 +11,6 @@ name: Release builds
 on:
   push:
     tags: ["v*"]
-    # Temporary, while the packaging is being brought up: packaging commits on
-    # the development branch build too.
-    branches: ["claude/unified-creative-editor-r9g9yr"]
-    paths: [".github/**", "scripts/package**"]
   workflow_dispatch:
 
 permissions:

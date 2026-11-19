@@ -4,14 +4,17 @@ This archive is self-contained. It holds the Tetra Studio editor (the Godot
 editor with the Tetra Image, Video and Blender workspaces) together with
 everything those workspaces use: GEGL and its filters, MLT with `melt`, FFmpeg
 and the frei0r effects, Kdenlive's effect and render-preset catalogs, and
-Blender 5.3. Nothing else has to be installed.
+Blender 5.3. Nothing else has to be installed. The download is about 740 MB
+for Linux and 630 MB for Windows, most of it Blender.
 
 ## Running
 
 Unpack the archive anywhere, then:
 
 - **Linux:** run `./tetra-studio` in the unpacked folder.
-- **Windows:** double-click `TetraStudio.bat` in the unpacked folder.
+- **Windows:** double-click `TetraStudio.bat` in the unpacked folder. (The
+  folder must keep its layout: on Windows the bundled libraries find their
+  plug-ins relative to `bin\`.)
 
 Start the editor through that launcher, not through the program in `bin/`
 directly: the launcher tells the editor where the bundled plug-ins, `melt`,
@@ -26,7 +29,7 @@ for example `./tetra-studio --editor --path my_project`.
 | Editor | `bin/tetra-studio-editor` | `bin\TetraStudio.exe` |
 | Shared libraries | `lib/` | `bin\*.dll` |
 | GEGL filters, babl extensions | `lib/gegl-0.4`, `lib/babl-0.1` | same |
-| MLT modules and data, `melt` | `lib/mlt-7`, `share/mlt-7`, `bin/melt` | `lib\mlt-7`, `share\mlt-7`, `bin\melt.exe` |
+| MLT modules and data, `melt` | `lib/mlt-7`, `share/mlt-7`, `bin/melt` | `lib\mlt`, `share\mlt`, `bin\melt.exe` |
 | frei0r effects | `lib/frei0r-1` | same |
 | Kdenlive catalogs | `kdenlive-data/` | same |
 | Blender 5.3.0 | `blender/` | same |

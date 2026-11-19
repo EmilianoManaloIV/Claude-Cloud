@@ -23,7 +23,7 @@ project named, and for the exact binaries from the distributor named under
 | GLib, GObject, GIO, GModule | `lib/` | LGPL-2.1-or-later | https://gitlab.gnome.org/GNOME/glib |
 | json-glib, gdk-pixbuf, Pango, librsvg | `lib/` | LGPL-2.1-or-later | https://gitlab.gnome.org/GNOME |
 | cairo, pixman | `lib/` | LGPL-2.1 or MPL-1.1 (cairo), MIT (pixman) | https://cairographics.org |
-| MLT framework, MLT++ and `melt` | `lib/`, `lib/mlt-7/`, `share/mlt-7/`, `bin/melt` | LGPL-2.1-or-later; the modules `plusgpl`, `xine`, `resample`, `rubberband`, `vidstab`, `frei0r` wrappers and `melt` as distributed are GPL-2.0-or-later or GPL-3.0-or-later | https://www.mltframework.org |
+| MLT framework, MLT++ and `melt` | `lib/`, `lib/mlt-7/`, `share/mlt-7/` (Windows: `lib/mlt/`, `share/mlt/`), `bin/melt` | LGPL-2.1-or-later; the modules `plusgpl`, `xine`, `resample`, `rubberband`, `vidstab`, `frei0r` wrappers and `melt` as distributed are GPL-2.0-or-later or GPL-3.0-or-later | https://www.mltframework.org |
 | FFmpeg (libavcodec, libavformat, libavfilter, libavutil, libswscale, libswresample, libavdevice, libpostproc) | `lib/` | GPL-2.0-or-later / GPL-3.0-or-later as built by the distributor (GPL components such as x264 and x265 enabled) | https://ffmpeg.org |
 | Codec and format libraries FFmpeg uses (x264, x265, libvpx, dav1d, SVT-AV1, libaom, opus, vorbis, mp3lame, theora, libwebp, OpenJPEG, libass and others) | `lib/` | GPL-2.0-or-later (x264, x265), BSD, MIT, LGPL or ISC (the others) | see each project |
 | frei0r plug-ins | `lib/frei0r-1/` | GPL-2.0-or-later | https://frei0r.dyne.org |
