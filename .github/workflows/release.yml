@@ -20,6 +20,11 @@ on:
 permissions:
   contents: write
 
+# A newer push to the same branch or tag replaces a build still running.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   linux:
     runs-on: ubuntu-24.04
@@ -47,7 +52,9 @@ jobs:
           restore-keys: scons-linux-
 
       - name: Build
-        run: scripts/build.sh compiledb=no cache_path="$PWD/build/scons-cache" cache_limit=4
+        run: |
+          mkdir -p build
+          scripts/build.sh compiledb=no cache_path="$PWD/build/scons-cache" cache_limit=4
 
       - name: Package
         run: scripts/package.sh linux upstream/godot/bin/godot.linuxbsd.editor.x86_64
@@ -116,6 +123,7 @@ jobs:
       - name: Build
         run: |
           pkg-config --modversion gegl-0.4 mlt++-7
+          mkdir -p build
           TETRA_PLATFORM=windows scripts/build.sh compiledb=no \
             cache_path="$(cygpath -m "$PWD")/build/scons-cache" cache_limit=4
 
