@@ -123,8 +123,15 @@ String TetraVideoRenderer::find_melt() {
 	if (!configured.is_empty() && FileAccess::exists(configured)) {
 		return configured;
 	}
-	for (const String &dir : OS::get_singleton()->get_environment("PATH").split(":", false)) {
-		for (const char *name : { "melt-7", "melt" }) {
+#ifdef WINDOWS_ENABLED
+	const char *separator = ";";
+	const char *names[] = { "melt-7.exe", "melt.exe" };
+#else
+	const char *separator = ":";
+	const char *names[] = { "melt-7", "melt" };
+#endif
+	for (const String &dir : OS::get_singleton()->get_environment("PATH").split(separator, false)) {
+		for (const char *name : names) {
 			if (FileAccess::exists(dir.path_join(name))) {
 				return dir.path_join(name);
 			}

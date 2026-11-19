@@ -281,6 +281,9 @@ func _test_keys() -> void:
 	await key(KEY_K)
 	check(not ws.is_playing(), "K pauses")
 	check(ws.get_playhead() > 100, "L moved forward: %d" % ws.get_playhead())
+	if common.clips.has("video"):
+		# The test video with its tone starts at frame 100; the engine feeds its sound to the audio server.
+		check(ws.get_engine().get_audio_frames_pushed() > 0, "playback pushes audio: %d frames" % ws.get_engine().get_audio_frames_pushed())
 	var position: int = ws.get_playhead()
 	await key(KEY_J)
 	await _tree.create_timer(0.6).timeout
@@ -451,7 +454,8 @@ func _test_timeline_mouse() -> void:
 	# Razor.
 	ws.set_tool(1)
 	var count := pr.get_clip_ids().size()
-	await click(tl, at_frame(60, title))
+	# The razor cuts at the frame boundary nearest to the pointer.
+	await click(tl, Vector2(tl.frame_to_x(60) + 0.3, clip_center(title).y))
 	check_eq(pr.get_clip_ids().size(), count + 1, "razor click splits the clip")
 	check_eq(clip(title)["length"], 35, "razor cut at the clicked frame")
 	var right_part := pr.get_clip_at(v3, 60)

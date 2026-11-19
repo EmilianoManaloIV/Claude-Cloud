@@ -1,8 +1,8 @@
 # tetra_video — the Video engine
 
 Tetra's Kdenlive: a non-linear video editor whose playback and rendering
-engine is MLT. This module is the engine layer; the workspace UI is built on
-the four classes below. All of them are registered in ClassDB, so everything
+engine is MLT. The engine layer is the four classes below; the workspace UI
+built on them is described under [Workspace](#workspace). All of them are registered in ClassDB, so everything
 here can be driven from GDScript (the tests in
 `tests/godot/project/tetra_video/` do exactly that).
 
@@ -415,6 +415,147 @@ renderer.progress.connect(func(frame, percent): bar.value = percent)
 renderer.finished.connect(func(ok, message): print("done: " if ok else "failed: ", message))
 renderer.start(project, "res://renders/out.ogv", "tetra/ogv", {"width": 1280, "height": 720, "quality": 7})
 ```
+
+## Workspace
+
+The **Video** main screen (next to 2D / 3D / Script, Ctrl+F7) is Kdenlive's
+editing layout: a menu bar, the Project Bin, the Monitor, the Effects /
+Effect Stack tabs, the Timeline and a status line. Sources are in `editor/`.
+A new project with tracks V1-V3 and A1-A2 is open from the start.
+
+What the user can do:
+
+- **Project Bin** — *Add Clip...* (video, audio, image files; also files
+  dragged from the FileSystem dock), *Add Color Clip*, *Add Title Clip*,
+  *Delete*. Rows show a thumbnail (made on a worker thread), the duration and
+  the name. Double-click previews a clip in the Clip Monitor; dragging a row
+  onto a track inserts it at the drop position (with snapping). A drop that
+  the project refuses (occupied place, wrong track kind, locked track) shows
+  a red ghost with the reason and inserts nothing.
+- **Monitor** — the frame under the playhead, fitted with its aspect kept;
+  transport buttons, loop toggle, a timecode field (`HH:MM:SS:FF`; type a
+  timecode or a frame number and press Enter), preview size (full, 1/2, 1/4).
+  Sound is played by the engine. The frame is rendered again after every
+  edit.
+- **Timeline** — ruler with timecode ticks, markers and the playhead (click
+  or drag to seek); track headers with hide/mute and lock buttons; clips with
+  name, thumbnail and an `fx` badge. Select tool: click selects (Shift adds;
+  a linked audio/video pair is selected together), drag moves across time and
+  tracks, dragging an edge trims. Razor tool: click cuts. Snapping (toggle in
+  the tool bar) pulls to clip edges, the playhead and markers. Ctrl+wheel,
+  the slider and *zoom to fit* change the zoom. Every edit goes through
+  `TetraVideoProject`; a refused edit leaves the clip where it was and the
+  status line says why.
+- **Effects** — the catalog in a `TetraOperationBrowser`; double-click adds
+  an effect to the selected clips it fits (video effects to video-track
+  clips, audio effects to audio-track clips), dragging it onto a clip adds it
+  to that clip. **Effect Stack** lists the selected clip's effects with
+  enable, move up/down, remove and a `TetraParamPanel`; rapid parameter
+  changes become one undo step.
+- **Menus** — Project: New, Open..., Save, Save As..., Project Settings...
+  (preset, size, frame rate), Render.... Edit: Undo, Redo, Delete, Ripple
+  Delete, Select All. Timeline: Add Video/Audio Track, Delete Track (the
+  track whose header was clicked last), Split at Playhead, Insert Space...,
+  Remove Space, Add/Delete Marker, Set Zone In/Out, Clear Zone.
+- **Render** — presets by group, output file, range (whole project or the
+  zone), size, progress bar and Cancel. A file rendered into the project
+  folder appears in the FileSystem dock.
+- **FileSystem dock** — `.mlt` files and video files (mp4, m4v, mov, mkv,
+  webm, avi, mpg, mpeg, ogv) are listed; opening an `.mlt` file opens it as
+  the project, opening a video file adds it to the bin and previews it. A
+  project that has a file is saved together with the scenes (Ctrl+S, before
+  a run, on quit); a new project is only written by Save As.
+
+Shortcuts (active only while the keyboard focus is inside the workspace and
+not in a text field; all listed under Editor Settings > Shortcuts >
+`tetra_video`):
+
+| Key | Action | Key | Action |
+| --- | --- | --- | --- |
+| Space | Play / pause | S / X | Select tool / Razor tool |
+| Left / Right | Previous / next frame | Delete | Delete selection |
+| Home / End | Go to start / end | Shift+Delete | Ripple delete |
+| J / K / L | Play backward / pause / play forward | Shift+R | Split at playhead |
+| M | Add marker at the playhead | I / O | Set zone in / out |
+| Ctrl+Z / Ctrl+Shift+Z | Undo / redo | Ctrl+= / Ctrl+- | Zoom in / out |
+| Ctrl+S / Ctrl+Shift+S | Save / Save As | Ctrl+Enter | Render... |
+| Ctrl+A | Select all clips | Escape | Cancel a drag |
+
+Scripting surface. Editor classes exist only inside the running editor; a
+tool script reaches the workspace with
+`ClassDB.class_call_static("TetraVideoWorkspace", "get_singleton")` (it is
+also the "Video" child of `EditorInterface.get_editor_main_screen()`).
+
+```
+TetraVideoWorkspace (VBoxContainer)
+  get_project() -> TetraVideoProject      get_engine() -> TetraMltEngine
+  get_bin() get_monitor() get_timeline() get_effects_browser() get_effect_stack() get_render_dialog()
+  new_project()   open_project(path) -> Error   save_project(path = "") -> Error
+  request_open_project(path)              # like the menu: asks about unsaved changes first
+  get_project_path() -> String            is_modified() -> bool
+  import_file(path) -> int                # bin id (existing one when already listed), -1 if unreadable
+  import_and_show(path) -> int            # import_file + preview in the Clip Monitor
+  add_color_clip(name, color, length) -> int     add_title_clip(name, text, length) -> int
+  seek(frame)  get_playhead() -> int  play()  pause()  is_playing() -> bool
+  set_tool(tool)  get_tool()              # TOOL_SELECT = 0, TOOL_RAZOR = 1
+  select_clip(clip_id, add = false)  clear_selection()  get_selected_clips() -> PackedInt32Array
+  add_effect_to_selection(operation_id) -> int   # number of clips that received it
+  delete_selection(ripple = false) -> bool       split_at_playhead() -> int
+  add_marker(text = "") -> bool           undo() -> bool   redo() -> bool
+  show_effects()  show_effect_stack()  open_render_dialog()  open_project_settings()
+  focus_timeline()  commit_pending_edits()  is_graph_pending() -> bool
+
+TetraVideoTimeline (Control)
+  set_playhead(frame, follow = false) get_playhead()   set_zoom(px_per_frame) set_zoom_at(px_per_frame, view_x) get_zoom()
+  get_zoom_min() get_zoom_max() zoom_to_fit()   set_scroll_frame(frame) get_scroll_frame()
+  set_tool(tool) get_tool()   set_snapping(bool) is_snapping()
+  set_selection(ids) get_selection() select_clip(id, add = false) clear_selection()
+  set_active_track(track) get_active_track()   set_zone(in, out) get_zone_in() get_zone_out()   # -1, -1 = no zone
+  frame_to_x(frame) x_to_frame(x) get_clip_rect(id) get_track_rect(track) get_ruler_rect()
+  get_track_header_button_rect(track, button)   # 0 = hide/mute, 1 = lock
+  signals: seek_requested(frame) selection_changed() zoom_changed(px_per_frame) tool_changed(tool)
+           active_track_changed(track) edit_refused(message) clip_activated(clip_id)
+           effect_dropped(clip_id, operation_id) interaction_started()
+
+TetraVideoMonitor (VBoxContainer)
+  show_clip(bin_id) show_project() is_clip_mode() get_clip_bin_id() get_clip_engine()
+  seek(frame) get_frame() play() pause() toggle_play() stop() is_playing() step(delta) go_to_start() go_to_end()
+  shuttle(direction)                      # -1 = J, 0 = K, 1 = L; repeated J/L doubles the speed
+  set_loop(bool) is_loop()   set_preview_divisor(1|2|4) get_preview_divisor()   refresh()   get_frame_image() -> Image
+  signals: position_changed(frame) mode_changed(clip_mode)
+
+TetraVideoBin (VBoxContainer)
+  refresh() get_selected_ids() select_clip(bin_id) popup_add_clip() popup_add_color() popup_add_title() delete_selected()
+  signals: clip_activated(bin_id) import_requested(paths)
+
+TetraVideoEffectStack (VBoxContainer)
+  set_clip(clip_id) get_clip() select_effect(index) get_selected_effect() get_effect_count()
+  get_param_panel() -> TetraParamPanel    commit_pending()
+
+TetraVideoRenderDialog (ConfirmationDialog)
+  popup_render(project, zone_in = -1, zone_out = -1)
+  set_preset(id) get_preset()   set_output_path(path) get_output_path()
+  set_range_mode(RANGE_PROJECT = 0 | RANGE_ZONE = 1) get_range_mode() set_range(in, out)
+  set_scale_divisor(n) get_scale_divisor()   start_render() -> Error  cancel_render()  is_rendering()  get_renderer()
+  signal render_finished(ok, message)     # message: the output path, or why it failed
+
+TetraVideoEditorPlugin (EditorPlugin)
+  get_singleton() (static)   get_workspace() -> TetraVideoWorkspace
+```
+
+The UI is verified inside the running editor by screenshot drivers in
+`tests/godot/project/tetra_video/shots/`:
+
+```sh
+scripts/screenshot.sh build/screens/video-checks.png  Video res://tetra_video/shots/checks.gd          # prints "N checks, M failed"
+scripts/screenshot.sh build/screens/video-editing.png Video res://tetra_video/shots/editing.gd
+scripts/screenshot.sh build/screens/video-render.png  Video res://tetra_video/shots/render_dialog.gd
+scripts/screenshot.sh build/screens/video-effects.png Video res://tetra_video/shots/effects_browser.gd
+```
+
+`checks.gd` drives the workspace with real mouse and key events (selection,
+moves, snapping, trims, razor, drag from the bin, shortcuts and their scope,
+effects, menus, project files, a render and a cancelled render).
 
 ## Tests
 

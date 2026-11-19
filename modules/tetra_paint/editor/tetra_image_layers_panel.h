@@ -88,7 +88,7 @@ public:
 
 	// Layer names as listed, top layer first.
 	PackedStringArray get_listed_names() const;
-	Tree *get_tree() const { return tree; }
+	Tree *get_layer_tree() const { return tree; }
 
 	TetraImageLayersPanel();
 };

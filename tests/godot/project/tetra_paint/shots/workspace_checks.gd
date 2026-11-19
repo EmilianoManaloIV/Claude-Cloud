@@ -342,7 +342,7 @@ func _test_layers() -> void:
 	check_eq(doc.get_layer_count(), 2, "delete")
 	await _frames(2)
 	check_eq(panel.get_listed_names().size(), 2, "the list follows")
-	var tree: Tree = panel.get_tree()
+	var tree: Tree = panel.get_layer_tree()
 	var first := tree.get_root().get_first_child()
 	check(first.get_icon(1) != null or true, "row exists")
 	check_eq(first.get_button_count(0), 1, "eye toggle in the first column")

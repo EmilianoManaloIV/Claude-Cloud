@@ -384,7 +384,7 @@ void TetraImageLayersPanel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("merge_down"), &TetraImageLayersPanel::merge_down);
 	ClassDB::bind_method(D_METHOD("delete_layer"), &TetraImageLayersPanel::delete_layer);
 	ClassDB::bind_method(D_METHOD("get_listed_names"), &TetraImageLayersPanel::get_listed_names);
-	ClassDB::bind_method(D_METHOD("get_tree"), &TetraImageLayersPanel::get_tree);
+	ClassDB::bind_method(D_METHOD("get_layer_tree"), &TetraImageLayersPanel::get_layer_tree);
 }
 
 TetraImageLayersPanel::TetraImageLayersPanel() {

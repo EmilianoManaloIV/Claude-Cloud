@@ -1152,7 +1152,7 @@ TetraVideoWorkspace::TetraVideoWorkspace() {
 	VBoxContainer *bin_box = memnew(VBoxContainer);
 	bin_box->set_h_size_flags(SIZE_EXPAND_FILL);
 	bin_box->set_stretch_ratio(1.0);
-	bin_box->set_custom_minimum_size(Size2(270, 0) * EDSCALE);
+	bin_box->set_custom_minimum_size(Size2(250, 0) * EDSCALE);
 	top_split->add_child(bin_box);
 	Label *bin_title = memnew(Label(TTR("Project Bin")));
 	bin_title->set_theme_type_variation("HeaderSmall");
@@ -1178,7 +1178,7 @@ TetraVideoWorkspace::TetraVideoWorkspace() {
 	side_tabs = memnew(TabContainer);
 	side_tabs->set_h_size_flags(SIZE_EXPAND_FILL);
 	side_tabs->set_stretch_ratio(1.0);
-	side_tabs->set_custom_minimum_size(Size2(230, 0) * EDSCALE);
+	side_tabs->set_custom_minimum_size(Size2(270, 0) * EDSCALE);
 	right_split->add_child(side_tabs);
 
 	effects_browser = memnew(TetraOperationBrowser);
