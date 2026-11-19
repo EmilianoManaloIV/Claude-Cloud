@@ -259,7 +259,7 @@ windows_deps() {
 # sets aside). Not recursive on purpose: followed into the Windows system
 # DLLs, the walk always ends at some optional DLL that does not exist.
 windows_missing_deps() {
-	ntldd "$1" 2>/dev/null | grep -i 'not found' | grep -viE 'api-ms-win-|ext-ms-' | awk '{ print $1 }' | tr '\n' ' '
+	{ ntldd "$1" 2>/dev/null || true; } | awk 'tolower($0) ~ /not found/ && tolower($1) !~ /^(api-ms-win-|ext-ms-)/ { printf "%s ", $1 }'
 }
 
 package_windows() {
