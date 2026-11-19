@@ -389,8 +389,10 @@ void TetraVideoTimeline::_update_trim(const Point2 &p_position) {
 		return;
 	}
 	bool snapped = false;
-	int frame = _snap_frame(x_to_frame(p_position.x), drag_ids, &snapped);
 	const int end = clip->position + clip->length;
+	// The edge keeps the distance to the pointer it had when it was grabbed, so a click on it does not move it.
+	const real_t grab_offset = drag_origin.x - frame_to_x(drag_mode == DRAG_TRIM_START ? clip->position : end);
+	int frame = _snap_frame(x_to_frame(p_position.x - grab_offset), drag_ids, &snapped);
 	if (drag_mode == DRAG_TRIM_START) {
 		frame = CLAMP(frame, 0, end - 1);
 	} else {

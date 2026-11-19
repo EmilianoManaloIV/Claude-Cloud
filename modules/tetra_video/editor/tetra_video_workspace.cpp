@@ -547,14 +547,28 @@ int TetraVideoWorkspace::_add_effect_to_clip(int p_clip_id, const Dictionary &p_
 }
 
 void TetraVideoWorkspace::shortcut_input(const Ref<InputEvent> &p_event) {
+	if (_handle_key(p_event)) {
+		accept_event();
+	}
+}
+
+void TetraVideoWorkspace::_timeline_gui_input(const Ref<InputEvent> &p_event) {
+	// The focused timeline sees a key before the viewport does, which would spend the arrow keys on moving the
+	// keyboard focus to a neighbouring control. Here they step through frames instead.
+	if (_handle_key(p_event)) {
+		timeline->accept_event();
+	}
+}
+
+bool TetraVideoWorkspace::_handle_key(const Ref<InputEvent> &p_event) {
 	const Ref<InputEventKey> key = p_event;
 	if (key.is_null() || !key->is_pressed() || !is_visible_in_tree()) {
-		return;
+		return false;
 	}
 	// The keys belong to the workspace only while the keyboard is in it, and never while text is being typed.
 	const Control *focus = get_viewport()->gui_get_focus_owner();
 	if (!focus || !(focus == this || is_ancestor_of(focus)) || Object::cast_to<LineEdit>(focus) || Object::cast_to<TextEdit>(focus)) {
-		return;
+		return false;
 	}
 	const bool echo = key->is_echo();
 	if (ED_IS_SHORTCUT("tetra_video/step_back", p_event)) {
@@ -562,7 +576,7 @@ void TetraVideoWorkspace::shortcut_input(const Ref<InputEvent> &p_event) {
 	} else if (ED_IS_SHORTCUT("tetra_video/step_forward", p_event)) {
 		monitor->step(1);
 	} else if (echo) {
-		return;
+		return false;
 	} else if (ED_IS_SHORTCUT("tetra_video/play_pause", p_event)) {
 		monitor->toggle_play();
 	} else if (ED_IS_SHORTCUT("tetra_video/go_to_start", p_event)) {
@@ -584,9 +598,9 @@ void TetraVideoWorkspace::shortcut_input(const Ref<InputEvent> &p_event) {
 	} else if (ED_IS_SHORTCUT("tetra_video/zoom_out", p_event)) {
 		_zoom_step(-1);
 	} else {
-		return;
+		return false;
 	}
-	accept_event();
+	return true;
 }
 
 TetraVideoWorkspace *TetraVideoWorkspace::get_singleton() {
@@ -1243,6 +1257,7 @@ TetraVideoWorkspace::TetraVideoWorkspace() {
 	timeline = memnew(TetraVideoTimeline);
 	timeline->set_v_size_flags(SIZE_EXPAND_FILL);
 	timeline->set_thumbnails(thumbnails);
+	timeline->connect(SceneStringName(gui_input), callable_mp(this, &TetraVideoWorkspace::_timeline_gui_input));
 	timeline->connect("seek_requested", callable_mp(this, &TetraVideoWorkspace::_timeline_seek_requested));
 	timeline->connect("selection_changed", callable_mp(this, &TetraVideoWorkspace::_timeline_selection_changed));
 	timeline->connect("zoom_changed", callable_mp(this, &TetraVideoWorkspace::_timeline_zoom_changed));

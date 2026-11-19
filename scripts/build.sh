@@ -16,8 +16,11 @@ fi
 "$ROOT/scripts/apply-patches.sh"
 
 JOBS="${TETRA_JOBS:-$(nproc)}"
+PLATFORM="${TETRA_PLATFORM:-linuxbsd}"
 LINKER_ARG=()
-if command -v mold >/dev/null 2>&1; then
+if [ "$PLATFORM" != linuxbsd ]; then
+	: # cross builds use the toolchain's own linker
+elif command -v mold >/dev/null 2>&1; then
 	LINKER_ARG=(linker=mold)
 elif command -v ld.lld >/dev/null 2>&1; then
 	LINKER_ARG=(linker=lld)
@@ -28,7 +31,7 @@ LOCK="${TMPDIR:-/tmp}/tetra-scons.lock"
 
 cd "$GODOT"
 exec flock "$LOCK" scons \
-	platform=linuxbsd \
+	platform="$PLATFORM" \
 	target=editor \
 	debug_symbols=no \
 	scu_build=yes \

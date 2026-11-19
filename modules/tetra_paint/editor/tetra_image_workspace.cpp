@@ -233,6 +233,10 @@ void TetraImageWorkspace::_set_document(const Ref<TetraImageDocument> &p_documen
 	layers_panel->set_document(document);
 	canvas->set_visible(document.is_valid());
 	welcome->set_visible(document.is_null());
+	if (document.is_valid()) {
+		// The canvas only gets its size with the next layout pass.
+		callable_mp(this, &TetraImageWorkspace::_fit_canvas).call_deferred();
+	}
 	tool_hint_override = String();
 	status_pointer->set_text(String());
 	_update_title();
@@ -246,6 +250,14 @@ void TetraImageWorkspace::_set_document(const Ref<TetraImageDocument> &p_documen
 		}
 	}
 	emit_signal(SNAME("document_changed"));
+}
+
+void TetraImageWorkspace::_fit_canvas() {
+	// A hidden workspace has no layout yet; the fit waits until it is shown.
+	fit_pending = !canvas->is_visible_in_tree();
+	if (!fit_pending) {
+		canvas->zoom_to_fit();
+	}
 }
 
 void TetraImageWorkspace::_document_edited() {
@@ -427,6 +439,9 @@ void TetraImageWorkspace::_notification(int p_what) {
 		case NOTIFICATION_VISIBILITY_CHANGED: {
 			if (is_visible_in_tree()) {
 				_load_operations();
+				if (fit_pending) {
+					callable_mp(this, &TetraImageWorkspace::_fit_canvas).call_deferred();
+				}
 				// The keys of the workspace work as soon as it is shown.
 				if (document.is_valid()) {
 					callable_mp((Control *)canvas, &Control::grab_focus).call_deferred(false);
@@ -478,7 +493,7 @@ bool TetraImageWorkspace::set_tool(const String &p_name) {
 		canvas->tool_cancel();
 	}
 	tool = found;
-	tool_buttons[tool]->set_pressed_no_signal(true);
+	tool_buttons[tool]->set_pressed(true);
 	canvas->set_tool(tool);
 	tool_hint_override = String();
 	_update_tool_options();
@@ -646,7 +661,7 @@ void TetraImageWorkspace::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_zoom", "zoom"), &TetraImageWorkspace::set_zoom);
 	ClassDB::bind_method(D_METHOD("get_zoom"), &TetraImageWorkspace::get_zoom);
 
-	ClassDB::bind_method(D_METHOD("get_canvas"), &TetraImageWorkspace::get_canvas);
+	ClassDB::bind_method(D_METHOD("get_image_canvas"), &TetraImageWorkspace::get_image_canvas);
 	ClassDB::bind_method(D_METHOD("get_layers_panel"), &TetraImageWorkspace::get_layers_panel);
 	ClassDB::bind_method(D_METHOD("get_tool_options_panel"), &TetraImageWorkspace::get_tool_options_panel);
 	ClassDB::bind_method(D_METHOD("get_operation_dialog"), &TetraImageWorkspace::get_operation_dialog);

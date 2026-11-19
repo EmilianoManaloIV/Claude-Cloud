@@ -176,6 +176,8 @@ private:
 	void _bin_clip_activated(int p_bin_id);
 	void _bin_import_requested(const PackedStringArray &p_paths);
 	void _monitor_position_changed(int p_frame);
+	bool _handle_key(const Ref<InputEvent> &p_event);
+	void _timeline_gui_input(const Ref<InputEvent> &p_event);
 	void _timeline_seek_requested(int p_frame);
 	void _timeline_selection_changed();
 	void _timeline_zoom_changed(double p_zoom);

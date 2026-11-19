@@ -41,7 +41,7 @@ class TetraParamPanel;
 //   var workspace := TetraImageWorkspace.get_singleton()
 //   var doc := workspace.new_document(1024, 768)
 //   workspace.set_tool("paintbrush")
-//   workspace.get_canvas().tool_press(Vector2(100, 100))
+//   workspace.get_image_canvas().tool_press(Vector2(100, 100))
 //
 // Filters run on a worker thread from a snapshot of the active layer. While
 // the operation dialog is open the newest result is shown in the document
@@ -120,6 +120,7 @@ private:
 	Ref<TetraImageDocument> document;
 	String document_path;
 	bool modified = false;
+	bool fit_pending = false;
 
 	MenuBar *menu_bar = nullptr;
 	PopupMenu *file_menu = nullptr;
@@ -136,6 +137,7 @@ private:
 	Ref<ButtonGroup> tool_group;
 	TetraImageColorSwatch *swatch = nullptr;
 	Control *welcome = nullptr;
+	Button *welcome_new = nullptr;
 	TetraImageCanvas *canvas = nullptr;
 	Control *busy_shield = nullptr;
 	Label *busy_label = nullptr;
@@ -187,6 +189,7 @@ private:
 	SpinBox *size_offset_x = nullptr;
 	Label *size_offset_y_label = nullptr;
 	SpinBox *size_offset_y = nullptr;
+	Control *size_center_spacer = nullptr;
 	Button *size_center = nullptr;
 	bool size_dialog_updating = false;
 
@@ -218,12 +221,14 @@ private:
 	FilterRequest *filter_waiting = nullptr;
 	bool busy = false;
 	String last_filter_id;
+	String last_filter_label;
 	Dictionary last_filter_values;
 	HashMap<String, Dictionary> remembered_values;
 
 	// tetra_image_workspace.cpp: layout, document, tools.
 	void _build_layout();
 	void _set_document(const Ref<TetraImageDocument> &p_document, const String &p_path);
+	void _fit_canvas();
 	void _document_edited();
 	void _update_title();
 	void _update_status();
@@ -250,7 +255,7 @@ private:
 	void _discard_confirmed();
 	void _popup_new_dialog();
 	void _new_dialog_confirmed();
-	void _popup_file_dialog(FilePurpose p_purpose);
+	void _popup_file_dialog(int p_purpose);
 	void _file_selected(const String &p_path);
 	void _open_checked(const String &p_path);
 	void _save_requested();
@@ -268,6 +273,8 @@ private:
 
 	static void _operations_thread(void *p_userdata);
 	void _load_operations();
+	void _rebuild_operation_menus();
+	Dictionary _find_operation(const String &p_id) const;
 	void _operations_loaded(const Array &p_operations);
 	void _add_operation_items(PopupMenu *p_menu, const Dictionary &p_node);
 	void _operation_menu_pressed(int p_index, PopupMenu *p_menu);
@@ -279,7 +286,7 @@ private:
 	void _request_filter(const Dictionary &p_values, bool p_commit);
 	void _start_filter_task(FilterRequest *p_request);
 	void _filter_thread(FilterRequest *p_request);
-	void _filter_finished(uint64_t p_serial, const Ref<Image> &p_result, bool p_commit);
+	void _filter_finished(uint64_t p_serial, const Ref<Image> &p_result, bool p_commit, const Dictionary &p_values);
 	void _drop_preview();
 	void _end_filter();
 	void _dialog_values_changed(const Dictionary &p_values);
@@ -354,7 +361,7 @@ public:
 	void set_zoom(real_t p_zoom);
 	real_t get_zoom() const;
 
-	TetraImageCanvas *get_canvas() const { return canvas; }
+	TetraImageCanvas *get_image_canvas() const { return canvas; }
 	TetraImageLayersPanel *get_layers_panel() const { return layers_panel; }
 	TetraParamPanel *get_tool_options_panel() const { return tool_options_panel; }
 	TetraOperationDialog *get_operation_dialog() const { return operation_dialog; }

@@ -87,6 +87,13 @@ void TetraImageLayersPanel::_update_list() {
 			item->set_selectable(COLUMN_LOCK, false);
 			if (id == active) {
 				item->select(COLUMN_NAME);
+				// The eye and lock cells are not selectable, so the row is
+				// marked as a whole with the accent colour.
+				Color highlight = get_theme_color(SNAME("accent_color"), EditorStringName(Editor));
+				highlight.a = 0.25f;
+				for (int column = 0; column < 3; column++) {
+					item->set_custom_bg_color(column, highlight);
+				}
 			}
 		}
 		if (document->get_layer_index(active) >= 0) {

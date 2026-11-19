@@ -16,6 +16,7 @@ var pr: TetraVideoProject
 var tl: Control
 var mon: Control
 var refused := []
+var _last_mouse := Vector2()
 
 
 func drive(p_tree: SceneTree) -> void:
@@ -96,6 +97,11 @@ func mouse_move(p_control: Control, p_local: Vector2, p_held: bool = true) -> vo
 	event.button_mask = MOUSE_BUTTON_MASK_LEFT if p_held else 0
 	event.position = p_control.get_global_position() + p_local
 	event.global_position = event.position
+	# The viewport measures the drag distance from the relative motion.
+	event.relative = event.position - _last_mouse
+	_last_mouse = event.position
+	# A drop asks the window system where the pointer is, so the real pointer goes along.
+	Input.warp_mouse(event.position)
 	root.push_input(event)
 	await frames(1)
 
@@ -122,6 +128,11 @@ func drag(p_control: Control, p_from: Vector2, p_to: Vector2, p_target: Control 
 
 func clip(p_id: int) -> Dictionary:
 	return pr.get_clip(p_id)
+
+
+## Point in the middle of a frame's column at the height of a clip.
+func at_frame(p_frame: int, p_clip: int) -> Vector2:
+	return Vector2(tl.frame_to_x(p_frame) + tl.get_zoom() * 0.5, tl.get_clip_rect(p_clip).get_center().y)
 
 
 func clip_center(p_id: int) -> Vector2:
@@ -385,11 +396,12 @@ func _test_timeline_mouse() -> void:
 	# ... and to the playhead.
 	pr.move_clip(orange, clip(orange)["track"], 300)
 	ws.seek(250)
+	tl.zoom_to_fit()
 	await frames()
+	zoom = tl.get_zoom()
 	from = clip_center(orange)
 	await drag(tl, from, from + Vector2(-50 * zoom - 5.0, 0))
 	check_eq(clip(orange)["position"], 250, "the dragged clip snaps to the playhead")
-	# ... and to a marker (at 150 the test video is in the way on V1, so use V3).
 	tl.set_snapping(false)
 
 	# A drop onto another clip is refused and the clip snaps back.
@@ -420,30 +432,24 @@ func _test_timeline_mouse() -> void:
 		var video: int = common.clips["video"]
 		var partner := pr.get_linked_clip(video)
 		check_eq(clip(partner)["track"], a1, "the audio half sits on A1")
-		from = clip_center(video)
-		await drag(tl, from, from + Vector2(20 * zoom, 0))
+		await drag(tl, at_frame(150, video), at_frame(170, video))
 		check_eq(clip(video)["position"], 120, "linked video moved")
 		check_eq(clip(partner)["position"], 120, "linked audio followed")
 		await click(tl, clip_center(video))
 		check_eq(ws.get_selected_clips().size(), 2, "clicking one half selects both linked clips")
 
 	# Trim by dragging an edge.
-	var rect: Rect2 = tl.get_clip_rect(blue)
-	var edge := Vector2(rect.end.x - 2.0, rect.get_center().y)
-	await drag(tl, edge, edge - Vector2(20 * zoom, 0))
+	await drag(tl, at_frame(99, blue), at_frame(79, blue))
 	check_eq(clip(blue)["length"], 80, "dragging the right edge trims the end")
 	check_eq(clip(blue)["position"], 0, "trimming the end keeps the start")
-	rect = tl.get_clip_rect(blue)
-	edge = Vector2(rect.position.x + 2.0, rect.get_center().y)
-	await drag(tl, edge, edge + Vector2(10 * zoom, 0))
+	await drag(tl, at_frame(0, blue), at_frame(10, blue))
 	check_eq(clip(blue)["position"], 10, "dragging the left edge trims the start")
 	check_eq(clip(blue)["length"], 70, "trimming the start keeps the end")
 
 	# Razor.
 	ws.set_tool(1)
 	var count := pr.get_clip_ids().size()
-	rect = tl.get_clip_rect(title)
-	await click(tl, Vector2(tl.frame_to_x(60) + 0.5, rect.get_center().y))
+	await click(tl, at_frame(60, title))
 	check_eq(pr.get_clip_ids().size(), count + 1, "razor click splits the clip")
 	check_eq(clip(title)["length"], 35, "razor cut at the clicked frame")
 	var right_part := pr.get_clip_at(v3, 60)
@@ -489,7 +495,7 @@ func _test_timeline_mouse() -> void:
 	# Clips on a locked track cannot be dragged.
 	from = clip_center(orange)
 	var locked_position: int = clip(orange)["position"]
-	await drag(tl, from, from + Vector2(30 * zoom, 0))
+	await drag(tl, from, from + Vector2(-30 * zoom, 0))
 	check_eq(clip(orange)["position"], locked_position, "a clip on a locked track does not move")
 	await click(tl, tl.get_track_header_button_rect(v1, 1).get_center())
 	check(not pr.is_track_locked(v1), "lock button unlocks")
@@ -535,6 +541,8 @@ func _test_effects() -> void:
 		check_eq(ws.add_effect_to_selection(audio_effect), 0, "an audio effect is not added to a video clip")
 
 	# Parameters: rapid edits make one undo step.
+	ws.select_clip(blue)
+	await frames()
 	stack.select_effect(1)
 	await frames()
 	check_eq(stack.get_selected_effect(), 1, "effect selected in the stack")
@@ -542,7 +550,7 @@ func _test_effects() -> void:
 	check(panel.has_param("smooth"), "panel shows the vignette's parameters")
 	undo_count = pr.get_undo_count()
 	var effects: Array = pr.get_clip_effects(blue)
-	var old_value: Variant = effects[1]["values"].get("smooth")
+	var old_value: float = effects[1]["values"].get("smooth", -1.0)
 	for value in [10.0, 20.0, 30.0]:
 		panel.set_value("smooth", value)
 		panel.value_changed.emit("smooth", value)
@@ -554,8 +562,8 @@ func _test_effects() -> void:
 	pr.undo()
 	await frames()
 	effects = pr.get_clip_effects(blue)
-	check_eq(effects[1]["values"].get("smooth"), old_value, "undo restores the old value")
-	check_eq(float(panel.get_value("smooth")), float(old_value), "panel shows the restored value")
+	check_eq(float(effects[1]["values"].get("smooth", -1.0)), old_value, "undo restores the old value")
+	check_eq(float(panel.get_value("smooth")), old_value, "panel shows the restored value")
 
 	# Enable, reorder, remove through the project; the stack follows.
 	pr.set_clip_effect_enabled(blue, 0, false)
