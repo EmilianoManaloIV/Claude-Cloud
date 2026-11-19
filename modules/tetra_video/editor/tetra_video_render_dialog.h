@@ -29,6 +29,8 @@ public:
 private:
 	Ref<TetraVideoProject> project;
 	Ref<TetraVideoRenderer> renderer;
+	// Set by cancel_render() until the renderer has reported back.
+	bool cancel_requested = false;
 	String preset_id = "tetra/mp4";
 	bool updating = false;
 
@@ -79,6 +81,8 @@ public:
 	Error start_render();
 	void cancel_render();
 	bool is_rendering() const;
+	// True while render_finished is emitted for a render the user cancelled.
+	bool was_cancelled() const { return cancel_requested; }
 	Ref<TetraVideoRenderer> get_renderer() const;
 
 	TetraVideoRenderDialog();

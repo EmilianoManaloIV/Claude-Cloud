@@ -139,10 +139,11 @@ void TetraVideoRenderDialog::_render_finished(bool p_ok, const String &p_message
 		}
 	} else {
 		progress_bar->set_value(0);
-		status_label->set_text(vformat(TTR("Render failed: %s"), p_message));
+		status_label->set_text(cancel_requested ? TTR("Render cancelled.") : vformat(TTR("Render failed: %s"), p_message));
 	}
 	_update_state();
-	emit_signal(SNAME("render_finished"), p_ok, p_message);
+	emit_signal(SNAME("render_finished"), p_ok, cancel_requested && !p_ok ? TTR("Render cancelled.") : p_message);
+	cancel_requested = false;
 }
 
 void TetraVideoRenderDialog::ok_pressed() {
@@ -253,6 +254,7 @@ Error TetraVideoRenderDialog::start_render() {
 		status_label->set_text(vformat(TTR("Render failed: %s"), renderer->get_last_error().is_empty() ? String(error_names[error]) : renderer->get_last_error()));
 		renderer.unref();
 	} else {
+		cancel_requested = false;
 		progress_bar->set_value(0);
 		status_label->set_text(TTR("Starting the render..."));
 	}
@@ -263,6 +265,7 @@ Error TetraVideoRenderDialog::start_render() {
 void TetraVideoRenderDialog::cancel_render() {
 	if (renderer.is_valid() && renderer->is_running()) {
 		status_label->set_text(TTR("Cancelling..."));
+		cancel_requested = true;
 		renderer->cancel();
 	}
 }

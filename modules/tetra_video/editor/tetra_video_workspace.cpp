@@ -537,6 +537,8 @@ Variant TetraVideoWorkspace::_effects_get_drag_data(const Point2 &p_point, Contr
 void TetraVideoWorkspace::_render_finished(bool p_ok, const String &p_message) {
 	if (p_ok) {
 		_set_status(vformat(TTR("Rendered %s."), p_message));
+	} else if (render_dialog->was_cancelled()) {
+		_set_status(TTR("Render cancelled."));
 	} else {
 		_set_status(vformat(TTR("Render failed: %s"), p_message), true);
 	}
@@ -1150,6 +1152,7 @@ TetraVideoWorkspace::TetraVideoWorkspace() {
 	VBoxContainer *bin_box = memnew(VBoxContainer);
 	bin_box->set_h_size_flags(SIZE_EXPAND_FILL);
 	bin_box->set_stretch_ratio(1.0);
+	bin_box->set_custom_minimum_size(Size2(270, 0) * EDSCALE);
 	top_split->add_child(bin_box);
 	Label *bin_title = memnew(Label(TTR("Project Bin")));
 	bin_title->set_theme_type_variation("HeaderSmall");

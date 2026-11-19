@@ -38,8 +38,10 @@ func drive(p_tree: SceneTree) -> void:
 	await _test_timeline_mouse()
 	await _test_effects()
 	await _test_bin_drag()
+	await _test_menus()
 	await _test_project_file()
 	await _test_render()
+	await _test_open_from_editor()
 	print("screenshot video checks: %d checks, %d failed" % [_checks, _failures])
 
 
@@ -618,6 +620,148 @@ func _test_bin_drag() -> void:
 	check(not pr.has_bin_clip(spare), "Delete removes an unused bin clip")
 
 
+## Chooses an item of one of the workspace's menus, as a click on it would.
+func menu(p_menu: String, p_item: String) -> bool:
+	for button: MenuButton in ws.find_children("*", "MenuButton", true, false):
+		if button.text != p_menu:
+			continue
+		var popup := button.get_popup()
+		for i in popup.item_count:
+			if popup.get_item_text(i) == p_item:
+				if popup.is_item_disabled(i):
+					return false
+				popup.id_pressed.emit(popup.get_item_id(i))
+				await frames()
+				return true
+	return false
+
+
+## The visible dialog of the workspace, null when none is open.
+func open_dialog() -> AcceptDialog:
+	for dialog: AcceptDialog in ws.find_children("*", "AcceptDialog", true, false):
+		if dialog.visible:
+			return dialog
+	return null
+
+
+func _test_menus() -> void:
+	ws.clear_selection()
+	var tracks := pr.get_track_count()
+	check(await menu("Timeline", "Add Video Track"), "menu item Add Video Track")
+	check_eq(pr.get_track_count(), tracks + 1, "Add Video Track")
+	var added: int = common.track_of(TetraVideoProject.TRACK_VIDEO, 3)
+	check_eq(pr.get_track_name(added), "V4", "the new track is V4")
+	# Delete Track removes the track whose header was clicked last.
+	await click(tl, Vector2(8, tl.get_track_rect(added).get_center().y))
+	check_eq(tl.get_active_track(), added, "clicking a header makes the track active")
+	check(await menu("Timeline", "Delete Track"), "menu item Delete Track")
+	check_eq(pr.get_track_count(), tracks, "Delete Track")
+	check(await menu("Timeline", "Add Audio Track"), "menu item Add Audio Track")
+	check_eq(pr.get_track_count(), tracks + 1, "Add Audio Track")
+	pr.undo()
+
+	# Insert Space pushes everything from the playhead on; Remove Space closes a gap again.
+	tl.set_active_track(-1)
+	var orange: int = common.clips["orange"]
+	var position: int = clip(orange)["position"]
+	ws.seek(position)
+	check(await menu("Timeline", "Insert Space..."), "menu item Insert Space")
+	var dialog := open_dialog()
+	if check(dialog != null, "Insert Space asks for the length"):
+		var seconds: SpinBox = dialog.find_children("*", "SpinBox", true, false)[0]
+		seconds.value = 2.0
+		dialog.get_ok_button().pressed.emit()
+		await frames()
+		check_eq(clip(orange)["position"], position + 50, "Insert Space moved the clip by 2 s")
+		ws.seek(position + 10)
+		tl.set_active_track(clip(orange)["track"])
+		check(await menu("Timeline", "Remove Space"), "menu item Remove Space")
+		# The whole gap goes: the clip lands on the end of its left neighbour.
+		var neighbour_end := 0
+		for id in pr.get_clips_in_track(clip(orange)["track"]):
+			if id != orange and clip(id)["position"] < position:
+				neighbour_end = maxi(neighbour_end, clip(id)["position"] + clip(id)["length"])
+		check_eq(clip(orange)["position"], neighbour_end, "Remove Space closed the gap")
+		tl.set_active_track(-1)
+
+	ws.seek(33)
+	check(await menu("Timeline", "Add Marker"), "menu item Add Marker")
+	check(pr.has_marker(33), "Add Marker at the playhead")
+	pr.undo()
+
+	# Project Settings: a preset fills in the fields, OK applies them as one undoable step.
+	check(await menu("Project", "Project Settings..."), "menu item Project Settings")
+	dialog = open_dialog()
+	if check(dialog != null, "Project Settings dialog opens"):
+		var presets: OptionButton = dialog.find_children("*", "OptionButton", true, false)[0]
+		var wanted := -1
+		for i in presets.item_count:
+			if presets.get_item_text(i).contains("720") and presets.get_item_text(i).contains("30"):
+				wanted = i
+				break
+		if check(wanted >= 0, "a 720p 30 fps preset is offered"):
+			presets.select(wanted)
+			presets.item_selected.emit(wanted)
+			dialog.get_ok_button().pressed.emit()
+			await frames()
+			check_eq([pr.get_width(), pr.get_height()], [1280, 720], "profile size applied")
+			check_near(pr.get_fps(), 30.0, 0.05, "profile fps applied")
+			pr.undo()
+			check_eq([pr.get_width(), pr.get_height()], [1920, 1080], "profile change undone")
+		else:
+			dialog.hide()
+	await common.settle(_tree)
+
+	# The bin's dialogs.
+	var bin_count := pr.get_bin_clip_ids().size()
+	ws.get_bin().popup_add_color()
+	await frames()
+	dialog = open_dialog()
+	if check(dialog != null, "Add Color Clip dialog opens"):
+		dialog.get_ok_button().pressed.emit()
+		await frames()
+		check_eq(pr.get_bin_clip_ids().size(), bin_count + 1, "Add Color Clip adds a bin clip")
+	ws.get_bin().popup_add_title()
+	await frames()
+	dialog = open_dialog()
+	if check(dialog != null, "Add Title Clip dialog opens"):
+		dialog.get_ok_button().pressed.emit()
+		await frames()
+		check_eq(pr.get_bin_clip_ids().size(), bin_count + 2, "Add Title Clip adds a bin clip")
+	# Files handed over by a drop from the FileSystem dock or the OS.
+	var before := pr.get_bin_clip_ids().size()
+	ws.get_bin().import_requested.emit(PackedStringArray(["/nonexistent/clip.mp4"]))
+	await frames()
+	check_eq(pr.get_bin_clip_ids().size(), before, "an unreadable dropped file adds nothing")
+
+
+func _test_open_from_editor() -> void:
+	# Files opened from the FileSystem dock arrive through the plugin's edit().
+	var path: String = common.tmp_dir().path_join("tetra_video_checks.mlt")
+	ws.new_project()
+	await frames()
+	EditorInterface.set_main_screen_editor("2D")
+	await frames(4)
+	var file := ResourceLoader.load(path)
+	if check(file != null and file.get_class() == "TetraVideoProjectFile", "an .mlt file loads as TetraVideoProjectFile"):
+		EditorInterface.edit_resource(file)
+		await common.settle(_tree)
+		check(ws.is_visible_in_tree(), "opening an .mlt file switches to the Video workspace")
+		check_eq(ws.get_project_path(), path, "the .mlt file is the open project")
+		check(ws.get_project().get_clip_ids().size() > 0, "its clips are loaded")
+	var video: String = common.make_test_video()
+	if video != "":
+		ws.new_project()
+		await frames()
+		var media := ResourceLoader.load(video)
+		if check(media != null and media.get_class() == "TetraVideoMediaFile", "an .mp4 file loads as TetraVideoMediaFile"):
+			EditorInterface.edit_resource(media)
+			await common.settle(_tree)
+			check_eq(ws.get_project().get_bin_clip_ids().size(), 1, "opening a video file adds it to the bin")
+			check(ws.get_monitor().is_clip_mode(), "and previews it in the clip monitor")
+			ws.get_monitor().show_project()
+
+
 func _test_project_file() -> void:
 	var path: String = common.tmp_dir().path_join("tetra_video_checks.mlt")
 	check(ws.is_modified(), "edited project is modified")
@@ -682,5 +826,6 @@ func _test_render() -> void:
 		await _tree.create_timer(0.1).timeout
 	if check(not result.is_empty(), "cancelled render reports back"):
 		check(not result[0][0], "cancelled render is not a success")
+		check_eq(result[0][1], "Render cancelled.", "cancelled render says so")
 	dialog.hide()
 	await frames()

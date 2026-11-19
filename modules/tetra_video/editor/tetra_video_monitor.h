@@ -83,7 +83,7 @@ public:
 
 	// Transport of whatever is shown.
 	void seek(int p_frame);
-	int get_position() const;
+	int get_frame() const;
 	void play();
 	void pause();
 	void toggle_play();

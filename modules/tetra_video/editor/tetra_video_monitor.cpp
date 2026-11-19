@@ -50,7 +50,7 @@ void TetraVideoMonitor::_apply_preview_size() {
 void TetraVideoMonitor::_update_timecode() {
 	const double fps = project.is_valid() ? project->get_fps() : 25.0;
 	if (!timecode_edit->has_focus()) {
-		timecode_edit->set_text(TetraVideoTimecode::from_frames(get_position(), fps));
+		timecode_edit->set_text(TetraVideoTimecode::from_frames(get_frame(), fps));
 	}
 	duration_label->set_text("/ " + TetraVideoTimecode::from_frames(_active_length(), fps));
 }
@@ -293,7 +293,7 @@ void TetraVideoMonitor::seek(int p_frame) {
 	_update_timecode();
 }
 
-int TetraVideoMonitor::get_position() const {
+int TetraVideoMonitor::get_frame() const {
 	return clip_mode ? clip_position : project_position;
 }
 
@@ -343,7 +343,7 @@ bool TetraVideoMonitor::is_playing() const {
 
 void TetraVideoMonitor::step(int p_delta) {
 	pause();
-	seek(get_position() + p_delta);
+	seek(get_frame() + p_delta);
 }
 
 void TetraVideoMonitor::go_to_start() {
@@ -397,7 +397,7 @@ void TetraVideoMonitor::set_preview_divisor(int p_divisor) {
 	preview_option->select(preview_option->get_item_index(divisor));
 	_apply_preview_size();
 	if (!is_playing()) {
-		seek(get_position());
+		seek(get_frame());
 	}
 }
 
@@ -414,7 +414,7 @@ void TetraVideoMonitor::refresh() {
 	}
 	const Ref<TetraMltEngine> engine = _active_engine();
 	if (engine.is_valid() && !engine->is_playing()) {
-		const int frame = MIN(get_position(), _active_length() - 1);
+		const int frame = MIN(get_frame(), _active_length() - 1);
 		_set_active_position(frame);
 		engine->seek(frame);
 		if (!clip_mode) {
@@ -457,7 +457,7 @@ void TetraVideoMonitor::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_clip_bin_id"), &TetraVideoMonitor::get_clip_bin_id);
 	ClassDB::bind_method(D_METHOD("get_clip_engine"), &TetraVideoMonitor::get_clip_engine);
 	ClassDB::bind_method(D_METHOD("seek", "frame"), &TetraVideoMonitor::seek);
-	ClassDB::bind_method(D_METHOD("get_position"), &TetraVideoMonitor::get_position);
+	ClassDB::bind_method(D_METHOD("get_frame"), &TetraVideoMonitor::get_frame);
 	ClassDB::bind_method(D_METHOD("play"), &TetraVideoMonitor::play);
 	ClassDB::bind_method(D_METHOD("pause"), &TetraVideoMonitor::pause);
 	ClassDB::bind_method(D_METHOD("toggle_play"), &TetraVideoMonitor::toggle_play);

@@ -88,25 +88,17 @@ String TetraVideoEditorPlugin::get_unsaved_status(const String &p_for_scene) con
 		if (project->get_bin_clip_ids().is_empty() && project->get_clip_ids().is_empty()) {
 			return String();
 		}
-		return TTR("Save the new video project before closing?");
+		return TTR("The new video project has no file yet and will be lost. Cancel and use Project > Save As... in the Video workspace to keep it.");
 	}
 	return vformat(TTR("Save changes to the video project %s before closing?"), path.get_file());
 }
 
 void TetraVideoEditorPlugin::save_external_data() {
-	if (get_unsaved_status().is_empty()) {
-		return;
-	}
-	if (!workspace->get_project_path().is_empty()) {
+	// Called whenever the editor saves (a scene, before a run, on quit). Only a project that has a file is written;
+	// a new one is never given a file behind the user's back.
+	if (workspace->is_modified() && !workspace->get_project_path().is_empty()) {
 		workspace->save_project();
-		return;
 	}
-	// "Save" was chosen for a project that has no file yet: it gets the first free default name.
-	String path = "res://video_project.mlt";
-	for (int i = 2; FileAccess::exists(path); i++) {
-		path = vformat("res://video_project_%d.mlt", i);
-	}
-	workspace->save_project(path);
 }
 
 void TetraVideoEditorPlugin::apply_changes() {
