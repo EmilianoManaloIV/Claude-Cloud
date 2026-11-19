@@ -45,7 +45,7 @@ jobs:
       - name: Fetch Godot and the Kdenlive catalogs
         run: scripts/fetch-upstream.sh godot kdenlive
 
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: build/scons-cache
           key: scons-linux-${{ github.sha }}
@@ -56,7 +56,24 @@ jobs:
           # Without these the build would quietly leave GEGL or MLT out.
           pkg-config --exists --print-errors gegl-0.4 mlt++-7
           mkdir -p build
-          scripts/build.sh compiledb=no cache_path="$PWD/build/scons-cache" cache_limit=4
+          # The whole log is long; keep going past the first error (-k) and
+          # end with every error, so one run shows all there is to fix.
+          scripts/build.sh -k compiledb=no cache_path="$PWD/build/scons-cache" cache_limit=4 >build.log 2>&1 || status=$?
+          tail -n 4 build.log
+          if [ "${status:-0}" -ne 0 ]; then
+            echo "=== compiler errors ==="
+            sed 's/\x1b\[[0-9;]*[mK]//g' build.log | grep -E ' error: |Error [0-9]|undefined reference|cannot find' \
+              | awk '{ match($0, /^[^ ]*\.(cpp|h|c|inc)/); key = substr($0, RSTART, RLENGTH); if (seen[key]++ < 4) print }' \
+              | cut -c1-260 | head -n 60
+            exit 1
+          fi
+
+      - name: Save the compiler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: build/scons-cache
+          key: scons-linux-${{ github.sha }}-${{ github.run_attempt }}
 
       - name: Package
         run: scripts/package.sh linux upstream/godot/bin/godot.linuxbsd.editor.x86_64
@@ -116,7 +133,7 @@ jobs:
           git config --global --add safe.directory '*'
           scripts/fetch-upstream.sh godot kdenlive
 
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: build/scons-cache
           key: scons-windows-${{ github.sha }}
@@ -126,8 +143,24 @@ jobs:
         run: |
           pkg-config --modversion gegl-0.4 mlt++-7
           mkdir -p build
-          TETRA_PLATFORM=windows scripts/build.sh compiledb=no \
-            cache_path="$(cygpath -m "$PWD")/build/scons-cache" cache_limit=4
+          # The whole log is long; keep going past the first error (-k) and
+          # end with every error, so one run shows all there is to fix.
+          TETRA_PLATFORM=windows scripts/build.sh -k compiledb=no cache_path="$(cygpath -m "$PWD")/build/scons-cache" cache_limit=4 >build.log 2>&1 || status=$?
+          tail -n 4 build.log
+          if [ "${status:-0}" -ne 0 ]; then
+            echo "=== compiler errors ==="
+            sed 's/\x1b\[[0-9;]*[mK]//g' build.log | grep -E ' error: |Error [0-9]|undefined reference|cannot find' \
+              | awk '{ match($0, /^[^ ]*\.(cpp|h|c|inc)/); key = substr($0, RSTART, RLENGTH); if (seen[key]++ < 4) print }' \
+              | cut -c1-260 | head -n 60
+            exit 1
+          fi
+
+      - name: Save the compiler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: build/scons-cache
+          key: scons-windows-${{ github.sha }}-${{ github.run_attempt }}
 
       - name: Package
         run: scripts/package.sh windows upstream/godot/bin/godot.windows.editor.x86_64.exe

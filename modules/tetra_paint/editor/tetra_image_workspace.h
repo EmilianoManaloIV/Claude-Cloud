@@ -47,6 +47,11 @@ class TetraParamPanel;
 // the operation dialog is open the newest result is shown in the document
 // inside an open undo group, which OK closes (one undo step) and Cancel
 // takes back.
+// <winnt.h> defines FILE_OPEN as a macro, which would rename the menu option below.
+#ifdef FILE_OPEN
+#undef FILE_OPEN
+#endif
+
 class TetraImageWorkspace : public VBoxContainer {
 	GDCLASS(TetraImageWorkspace, VBoxContainer);
 

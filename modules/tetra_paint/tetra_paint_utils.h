@@ -33,8 +33,8 @@ static const int TETRA_ROW_BLOCK = 32;
 template <typename F>
 void tetra_parallel_rows(int p_rows, int p_width, F &&p_func) {
 	const int blocks = (p_rows + TETRA_ROW_BLOCK - 1) / TETRA_ROW_BLOCK;
-	const bool small = int64_t(p_rows) * p_width < 64 * 64;
-	tetra_parallel_for(blocks, small ? blocks + 1 : 2, [&](int p_block) {
+	const bool few_pixels = int64_t(p_rows) * p_width < 64 * 64; // not "small": a macro in the Windows headers
+	tetra_parallel_for(blocks, few_pixels ? blocks + 1 : 2, [&](int p_block) {
 		const int first = p_block * TETRA_ROW_BLOCK;
 		const int end = first + TETRA_ROW_BLOCK < p_rows ? first + TETRA_ROW_BLOCK : p_rows;
 		p_func(first, end);
