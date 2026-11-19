@@ -64,6 +64,19 @@ GDScript today and covered by the headless tests (20 test files).
   scene description.
 - Not done: a native Blender-style mesh edit mode in the viewport.
 
+## Download
+
+Tagged releases carry one self-contained archive per platform:
+`tetra-studio-linux-x86_64.tar.gz` and `tetra-studio-windows-x86_64.zip`.
+Unpack it and run `./tetra-studio` (Linux) or `TetraStudio.bat` (Windows).
+The archive includes GEGL, MLT with `melt`, FFmpeg, the frei0r effects,
+Kdenlive's catalogs and Blender 5.3, so nothing else needs installing; see
+[docs/DOWNLOAD.md](docs/DOWNLOAD.md) for what is inside and
+[THIRD_PARTY.md](THIRD_PARTY.md) for the licences.
+
+The archives are built by `.github/workflows/release.yml`, on a pushed `v*`
+tag or by hand from the Actions tab, with `scripts/package.sh`.
+
 ## Building
 
 ```sh

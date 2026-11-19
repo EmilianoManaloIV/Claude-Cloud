@@ -11,6 +11,7 @@
 #include "core/input/shortcut.h"
 #include "core/io/file_access.h"
 #include "core/object/callable_mp.h"
+#include "core/templates/hash_set.h"
 #include "editor/editor_node.h"
 #include "editor/file_system/editor_file_system.h"
 #include "editor/gui/editor_file_dialog.h"
@@ -192,6 +193,15 @@ void TetraImageWorkspace::_add_operation_items(PopupMenu *p_menu, const Dictiona
 		_add_operation_items(submenu, category);
 	}
 	const Array ids = p_node["operations"];
+	// Where Tetra's own operation and an engine's carry the same name in one
+	// menu, the engine's is marked.
+	HashSet<String> native_labels;
+	for (int i = 0; i < ids.size(); i++) {
+		const HashMap<String, Dictionary>::ConstIterator found = operations_by_id.find(ids[i]);
+		if (found && found->value.get("source", String()) == "native") {
+			native_labels.insert(found->value["label"]);
+		}
+	}
 	for (int i = 0; i < ids.size(); i++) {
 		const String id = ids[i];
 		const HashMap<String, Dictionary>::ConstIterator found = operations_by_id.find(id);
@@ -200,7 +210,12 @@ void TetraImageWorkspace::_add_operation_items(PopupMenu *p_menu, const Dictiona
 		}
 		const Dictionary &operation = found->value;
 		const bool has_params = !Array(operation.get("params", Array())).is_empty();
-		p_menu->add_item(String(operation["label"]) + (has_params ? "..." : ""));
+		String label = operation["label"];
+		const String source = operation.get("source", String());
+		if (source != "native" && native_labels.has(label)) {
+			label += " (" + source.to_upper() + ")";
+		}
+		p_menu->add_item(label + (has_params ? "..." : ""));
 		const int index = p_menu->get_item_count() - 1;
 		p_menu->set_item_metadata(index, id);
 		p_menu->set_item_tooltip(index, operation.get("description", String()));
@@ -208,6 +223,7 @@ void TetraImageWorkspace::_add_operation_items(PopupMenu *p_menu, const Dictiona
 }
 
 void TetraImageWorkspace::_operation_menu_pressed(int p_index, PopupMenu *p_menu) {
+	ERR_FAIL_INDEX(p_index, p_menu->get_item_count());
 	const Variant item_data = p_menu->get_item_metadata(p_index);
 	if (item_data.get_type() == Variant::STRING) {
 		_open_operation(item_data, Dictionary(), false);

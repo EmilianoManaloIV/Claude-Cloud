@@ -1,10 +1,11 @@
-# tetra_paint — the Image engine
+# tetra_paint — the Image workspace and its engine
 
 Tetra's GIMP: a layered raster document with GIMP's layer modes, selections,
 paint tools, fills, transforms, colour operations and filters, the GEGL filter
-bridge and OpenRaster file support. This module holds the engine; the Image
-workspace UI drives it through the ClassDB API described here, and so do the
-headless tests in `tests/godot/project/tetra_paint/`.
+bridge and OpenRaster file support, and the **Image** main screen of the
+editor built on it (see [Workspace](#workspace)). The workspace drives the
+engine through the ClassDB API described here, and so do the headless tests in
+`tests/godot/project/tetra_paint/`.
 
 | Class | File | What it is |
 | --- | --- | --- |
@@ -398,6 +399,170 @@ doc.end_undo_group()
 A `filter_image` result is the bare filter output, not limited by the
 selection; to commit it through the selection use `apply_operation` instead.
 
+## Workspace
+
+`editor/` adds the main screen **Image** next to 2D, 3D and Script
+(`TetraImageEditorPlugin`, Ctrl+F6). It edits one image at a time.
+
+| Class (EDITOR level) | File | What it is |
+| --- | --- | --- |
+| `TetraImageEditorPlugin` | `editor/tetra_image_editor_plugin.*` | The main-screen plugin; opens image resources in the workspace. |
+| `TetraImageWorkspace` (VBoxContainer) | `editor/tetra_image_workspace.*`, `..._menus.cpp` | Menu bar, toolbox, canvas, Tool Options, Layers, status bar; the scripting surface. |
+| `TetraImageCanvas` (TetraCanvasView) | `editor/tetra_image_canvas.*` | Tiled display of the composite and the pointer tools. |
+| `TetraImageLayersPanel` (VBoxContainer) | `editor/tetra_image_layers_panel.*` | The layer list with mode, opacity and stack buttons. |
+| `TetraImageColorSwatch` (Control) | `editor/tetra_image_color_swatch.*` | Foreground/background colour area. |
+| `TetraImageTools` (not in ClassDB) | `editor/tetra_image_tools.*` | Tool names, shortcuts, hints and option schemas. |
+
+### What the user can do
+
+- **Start**: the welcome page offers New Image... and Open...; double-clicking
+  a png, jpg, jpeg, webp, exr, tga, bmp or ora file in the FileSystem dock
+  opens it here (the plugin `handles()` `Texture2D` and `Image` resources
+  whose file has one of these extensions).
+- **Canvas**: wheel zooms about the pointer, middle-drag or Space+drag pans.
+  The composite is shown through 256 px textures; an edit re-composites its
+  rectangle once per frame and uploads only the tiles it touches. Above
+  100 % the pixels are shown unfiltered. Transparency shows the editor's
+  checkerboard, the selection is outlined with marching ants, and the brush
+  outline follows the pointer. A pen's pressure reaches the stroke (enable
+  "Pressure Changes Size/Opacity" in the Tool Options); the other end of a
+  pen erases. Right-click or Escape cancels the gesture under way.
+- **Tools** (toolbox on the left, GIMP's keys):
+
+  | Tool | Key | Gesture |
+  | --- | --- | --- |
+  | Rectangle Select / Ellipse Select | R / E | Drag. Shift adds, Ctrl subtracts, Shift+Ctrl intersects; a click selects nothing. |
+  | Fuzzy Select | U | Click the area of similar colour. |
+  | Move | M | Drag the active layer. |
+  | Zoom | Z | Click zooms in, Ctrl+click out. |
+  | Color Picker | O | Click sets the foreground colour, Ctrl+click the background. |
+  | Bucket Fill | Shift+B | Click. |
+  | Gradient | G | Drag from start to end (foreground to background). |
+  | Pencil / Paintbrush / Eraser / Airbrush | N / P / Shift+E / A | Drag; Shift+click draws a straight line from the last point. |
+  | Clone | C | Ctrl+click sets the source, then paint. |
+  | Smudge | S | Drag. |
+
+  X swaps and D resets the colours, [ and ] change the brush size. The
+  **Tool Options** panel is a `TetraParamPanel` generated from
+  `TetraImageTools::get_options_schema()` (size, hardness, opacity, flow,
+  spacing, paint mode, threshold, gradient shape and repeat, selection mode
+  and feather, ...); every tool keeps its own values. Clicking a square of the
+  colour area opens Godot's ColorPicker.
+- **Layers**: top layer first, with eye, thumbnail, name (double-click
+  renames) and alpha lock; mode and opacity of the active layer; new,
+  duplicate, raise, lower, merge down, delete.
+- **Menus**: File (New... Ctrl+N, Open... Ctrl+O, Save Ctrl+S, Save As...
+  Ctrl+Shift+S, Export As... Ctrl+Shift+E, Close Ctrl+W), Edit (Undo Ctrl+Z
+  and Redo Ctrl+Shift+Z or Ctrl+Y with the step name, Clear Delete, Fill with
+  FG Ctrl+, / BG Ctrl+.), Select (All Ctrl+A, None Ctrl+Shift+A, Invert
+  Ctrl+I, Feather..., Grow..., Shrink...), View (zoom in =, out -, 100 % 1,
+  fit Ctrl+Shift+J), Image (flip, rotate, Scale Image..., Canvas Size...,
+  Crop to Selection, Flatten Image), Layer (New Ctrl+Shift+N, Duplicate
+  Ctrl+Shift+D, Raise, Lower, Merge Down, Delete, Flip), and **Colors** and
+  **Filters**, built from `TetraImageDocument.get_operations()` (native and
+  GEGL) as submenus by category. Filters also has Repeat (Ctrl+F) and Search
+  Filters... (/), a `TetraOperationBrowser`.
+- **Filters**: an operation with parameters opens a `TetraOperationDialog`.
+  The preview is computed on a worker thread from a snapshot of the layer
+  (a newer request replaces a waiting one) and shown on the canvas as a real
+  edit inside an open undo group; OK keeps it as one undo step, Cancel takes
+  it back and leaves the history untouched. Operations without parameters are
+  applied at once. The dialog reopens with the values used last.
+- **Saving**: Save writes to the file the image came from. `.ora` keeps the
+  layers; png, jpg, jpeg, webp and exr are written flattened. When such a
+  file has more than one layer, Save asks whether to "Export Flattened" to it
+  or to "Save as .ora" beside it. Files inside the project are passed to
+  `EditorFileSystem` (`update_file`, and a re-import when the file is already
+  imported), so textures in open scenes show the new pixels. Unsaved changes
+  mark the title with `(*)`; New, Open, Close and opening another file ask
+  first, and quitting the editor lists the image among the unsaved work.
+
+All keys can be changed in the editor's shortcut settings (`tetra_image/*`).
+They act only while the workspace is shown and the keyboard focus is inside
+it, and never while text is being typed.
+
+### Scripting surface
+
+`TetraImageWorkspace.get_singleton()` (static, bound) returns the workspace
+inside the running editor. Everything a menu or a tool does is reachable:
+
+```
+new_document(width, height, fill = Color.WHITE) -> TetraImageDocument   # fill is a display (sRGB) colour; alpha 0 = transparent; does not ask
+open_file(path) -> Error                 # does not ask
+request_open_file(path)                  # asks first when there are unsaved changes
+save() -> Error                          # to get_document_path(): .ora with layers, otherwise flattened
+save_as(path) -> Error                   # .ora, png, jpg, jpeg, webp, exr; becomes the document's file
+export_as(path) -> Error                 # flattened copy; the document keeps its file
+close_document()
+get_document() -> TetraImageDocument, has_document(), get_document_path(), is_modified(), can_save_directly()
+
+set_tool(name) -> bool, get_tool() -> String, get_tool_names() -> PackedStringArray
+#   paintbrush pencil eraser airbrush smudge clone bucket-fill gradient color-picker
+#   rect-select ellipse-select fuzzy-select move zoom
+get_tool_options_schema(tool) -> Dictionary     # operation "tool:<name>" of the shared schema
+get_tool_options(tool) -> Dictionary
+set_tool_option(tool, name, value)              # percentages 0..100, thresholds 0..255
+set_foreground_color(color), get_foreground_color(), set_background_color(color), get_background_color()   # display colours
+swap_colors(), reset_colors()
+
+get_operations() -> Array, are_operations_loaded() -> bool    # listed on a worker thread when the workspace is first shown
+apply_operation(id, values = {}) -> Error       # at once on the active layer, one undo step
+show_operation_dialog(id, values = {})          # dialog with live preview; without parameters applies in the background
+repeat_last_operation()
+is_filter_running() -> bool, is_preview_shown() -> bool
+
+undo() -> bool, redo() -> bool
+menu_option(option)                             # TetraImageWorkspace.FILE_NEW ... VIEW_ZOOM_FIT, the menu items
+zoom_to_fit(), set_zoom(zoom), get_zoom()
+
+get_image_canvas() -> TetraImageCanvas, get_layers_panel() -> TetraImageLayersPanel
+get_tool_options_panel() -> TetraParamPanel, get_operation_dialog() -> TetraOperationDialog
+get_menu_bar() -> MenuBar, get_menu(name) -> PopupMenu     # "File" "Edit" "Select" "View" "Image" "Layer" "Colors" "Filters"
+get_status_text() -> String, get_title_text() -> String
+```
+
+Signals: `document_changed()`, `operations_loaded()`, `operation_applied(id)`.
+
+`TetraImageCanvas` performs pointer gestures with the active tool, in image
+pixels:
+
+```
+tool_press(position, pressure = 1.0, shift = false, ctrl = false)
+tool_drag(position, pressure = 1.0)
+tool_release(), tool_cancel(), is_tool_active()
+set_clone_source(position), has_clone_source_point()
+set_input_locked(bool), is_input_locked()
+get_tile_count(), get_tile_update_count(), get_outline_point_count()    # for tests
+```
+
+Signals: `pointer_moved(position)`, `pointer_exited()`,
+`color_picked(color, background)`, `status_message(text)`; plus everything of
+`TetraCanvasView`.
+
+`TetraImageLayersPanel`: `new_layer()`, `duplicate_layer()`, `raise_layer()`,
+`lower_layer()`, `merge_down()`, `delete_layer()`, `get_listed_names()` (top
+layer first), `get_layer_tree() -> Tree`.
+
+```gdscript
+var ws := TetraImageWorkspace.get_singleton()
+var doc := ws.new_document(1024, 768)
+ws.set_tool("paintbrush")
+ws.set_tool_option("paintbrush", "size", 40.0)
+ws.set_foreground_color(Color.RED)
+var canvas := ws.get_image_canvas()
+canvas.tool_press(Vector2(100, 100))
+canvas.tool_drag(Vector2(400, 300))
+canvas.tool_release()
+ws.apply_operation("gegl:gaussian-blur", {"std-dev-x": 4.0, "std-dev-y": 4.0})
+ws.save_as("res://painting.ora")
+```
+
+Two engine methods exist for the workspace's preview and are bound as well:
+`cancel_undo_group()` reverts and drops everything since the outermost
+`begin_undo_group()` (the redo stack is kept), and
+`apply_filtered_image(layer_id, filtered, name)` commits an already filtered
+image through the selection and `lock_alpha` as one undo step.
+
 ## Build
 
 `SCsub` looks for `gegl-0.4` with pkg-config. When it is found, the module is
@@ -412,3 +577,26 @@ compositing, undo), `test_selection.gd`, `test_paint.gd`, `test_edit.gd`
 (fills, gradients, transforms), `test_operations.gd`, `test_gegl.gd` and
 `test_files.gd`. They also write `build/screens/paint-layer-modes.png`,
 `paint-strokes.png`, `paint-gradients.png` and `paint-gegl.png`.
+
+The workspace classes exist only inside the running editor, so their
+behaviour is checked by a driver that runs there (under Xvfb) and prints
+`screenshot image workspace checks: <n> checks, <m> failed`, with one
+`screenshot FAILED: ...` line per failure:
+
+```sh
+scripts/screenshot.sh build/screens/image-checks.png Image res://tetra_paint/shots/workspace_checks.gd
+```
+
+It covers the welcome page, the tiled canvas (one tile uploaded for a stroke
+inside one tile, painting speed on 2048 x 2048, real mouse events), every
+tool and its key, the focus rules of the keys, the layers panel, the menus
+and their dialogs, the filter preview (supersede, cancel, commit, repeat,
+search) and opening, saving and re-importing a project file. The other
+drivers in `tests/godot/project/tetra_paint/shots/` make pictures:
+
+```sh
+scripts/screenshot.sh build/screens/image-workspace.png Image res://tetra_paint/shots/workspace_layers.gd
+scripts/screenshot.sh build/screens/image-filter-dialog.png Image res://tetra_paint/shots/workspace_filter_dialog.gd
+scripts/screenshot.sh build/screens/image-selection-menu.png Image res://tetra_paint/shots/workspace_selection_menu.gd
+scripts/screenshot.sh build/screens/image-zoom.png Image res://tetra_paint/shots/workspace_zoom.gd
+```

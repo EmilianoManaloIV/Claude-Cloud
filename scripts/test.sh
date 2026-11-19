@@ -2,14 +2,16 @@
 # Run the headless tests in tests/godot/project/<module>/test_*.gd.
 #   scripts/test.sh                # all modules
 #   scripts/test.sh tetra_paint    # one module
+# TETRA_BIN names another editor to test, such as a packaged archive's
+# tetra-studio launcher.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$ROOT/upstream/godot/bin/godot.linuxbsd.editor.x86_64"
+BIN="${TETRA_BIN:-$ROOT/upstream/godot/bin/godot.linuxbsd.editor.x86_64}"
 PROJECT="$ROOT/tests/godot/project"
 
 if [ ! -x "$BIN" ]; then
-	echo "Editor binary not found. Run scripts/build.sh first." >&2
+	echo "Editor binary not found: $BIN. Run scripts/build.sh first." >&2
 	exit 1
 fi
 if [ -z "${TETRA_BLENDER_PYTHON:-}" ] && [ -x "$ROOT/build/blender-venv/bin/python" ]; then

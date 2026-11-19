@@ -76,6 +76,44 @@ It starts the editor under Xvfb with software OpenGL, switches to the named
 main screen, waits, and saves the window as a PNG. A driver script can be
 passed as a third argument to set up state before the capture.
 
+## Packaging
+
+```sh
+sudo apt-get install patchelf
+scripts/package.sh linux upstream/godot/bin/godot.linuxbsd.editor.x86_64
+scripts/package-verify.sh dist/tetra-studio-linux-x86_64.tar.gz
+TETRA_BIN=/path/to/unpacked/tetra-studio scripts/test.sh
+```
+
+`scripts/package.sh` writes a relocatable archive to `dist/`: the editor, every
+shared library it and its plug-ins need (found with `ldd`, minus the C
+library, the C++ runtime and the graphics, display-server and ALSA libraries
+that must come from the host), the GEGL, babl, MLT and frei0r plug-in
+directories, `melt`, Kdenlive's catalogs and the official Blender build, which
+it downloads. Every bundled file gets a relative `RUNPATH`, and the
+`tetra-studio` launcher sets `GEGL_PATH`, `BABL_PATH`, `MLT_REPOSITORY`,
+`MLT_DATA`, `FREI0R_PATH`, `TETRA_KDENLIVE_DATA` and `PATH`. It does not set
+`LD_LIBRARY_PATH`, which Blender would inherit and which breaks it.
+`TETRA_SKIP_BLENDER=1` packages without Blender;
+`TETRA_BLENDER_ARCHIVE=<file>` uses an already downloaded one.
+
+`scripts/package-verify.sh` unpacks the archive into a fresh directory, runs
+`scripts/package-smoke.gd` through the launcher with an empty environment and
+checks, from the dynamic loader's trace, that GEGL, MLT, FFmpeg and their
+plug-ins were loaded from the archive.
+
+The Windows archive is built in an MSYS2 UCRT64 shell, the MSYS2 environment
+that packages both GEGL and MLT:
+
+```sh
+pacman -S git zip unzip mingw-w64-ucrt-x86_64-{gcc,scons,pkgconf,ntldd,gegl,mlt,frei0r-plugins,ffmpeg}
+TETRA_PLATFORM=windows scripts/build.sh
+scripts/package.sh windows upstream/godot/bin/godot.windows.editor.x86_64.exe
+```
+
+`.github/workflows/release.yml` does both on GitHub's runners and attaches the
+archives to the release when a `v*` tag is pushed.
+
 ## Layout
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the module layout, the operation

@@ -432,7 +432,7 @@ void TetraImageCanvas::_feather_and_close(const String &p_name) {
 		document->feather_selection(feather);
 	}
 	document->end_undo_group();
-	_message(document->is_selection_empty() ? TTR("Nothing is selected.") : vformat(TTR("%s: %d × %d px"), p_name, document->selection_bounds().size.x, document->selection_bounds().size.y));
+	_message(document->is_selection_empty() ? TTR("Nothing is selected.") : vformat(U"%s: %d × %d px", p_name, document->selection_bounds().size.x, document->selection_bounds().size.y));
 }
 
 void TetraImageCanvas::_pick(const Vector2 &p_position) {

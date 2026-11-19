@@ -47,6 +47,11 @@ func _pixel(p_doc: TetraImageDocument, p_x: int, p_y: int) -> Color:
 	return p_doc.composite(Rect2i(p_x, p_y, 1, 1)).get_pixel(0, 0)
 
 
+func _close(p_color: Color, p_expected: Color) -> bool:
+	# The centre of a soft brush dab is a hair short of full coverage.
+	return absf(p_color.r - p_expected.r) < 0.03 and absf(p_color.g - p_expected.g) < 0.03 and absf(p_color.b - p_expected.b) < 0.03 and absf(p_color.a - p_expected.a) < 0.03
+
+
 func _key(p_code: Key, p_shift: bool = false, p_ctrl: bool = false) -> void:
 	var event := InputEventKey.new()
 	event.keycode = p_code
@@ -115,7 +120,7 @@ func _test_canvas() -> void:
 	canvas.tool_release()
 	await _frames(2)
 	check_eq(canvas.get_tile_update_count() - uploads, 1, "a stroke inside one tile re-uploads one tile")
-	check(_pixel(doc, 350, 350).is_equal_approx(Color.RED), "the stroke painted with the foreground colour")
+	check(_close(_pixel(doc, 350, 350), Color.RED), "the stroke painted with the foreground colour")
 	check_eq(ws.get_title_text(), "[Untitled] (*)", "an edit marks the title")
 	check(ws.is_modified(), "and the document as modified")
 
@@ -150,9 +155,10 @@ func _test_canvas() -> void:
 	_mouse(canvas, Vector2(1560, 500), false, true)
 	check(canvas.has_clone_source_point(), "Ctrl+click sets the clone source")
 	ws.set_tool_option("clone", "size", 30.0)
+	ws.set_tool_option("clone", "hardness", 100.0)
 	canvas.tool_press(Vector2(1000, 200))
 	canvas.tool_release()
-	check(_pixel(doc, 1000, 200).is_equal_approx(Color.BLUE), "clone copies from the source")
+	check(_close(_pixel(doc, 1000, 200), Color.BLUE), "clone copies from the source: " + str(_pixel(doc, 1000, 200)))
 
 	# Zoom tool and nearest filtering above 100 %.
 	ws.set_zoom(4.0)
@@ -185,6 +191,21 @@ func _test_tools_and_shortcuts() -> void:
 	check_eq(ws.get_background_color(), Color.RED, "X swaps the colours (background)")
 	_key(KEY_D)
 	check_eq([ws.get_foreground_color(), ws.get_background_color()], [Color.BLACK, Color.WHITE], "D resets the colours")
+
+	# The colour area opens Godot's ColorPicker.
+	var swatch: Control = ws.find_children("*", "TetraImageColorSwatch", true, false)[0]
+	swatch.foreground_pressed.emit()
+	var picker: ColorPicker = ws.find_children("*", "ColorPicker", true, false)[0]
+	check(picker.is_visible_in_tree(), "clicking the foreground swatch opens a ColorPicker")
+	picker.color_changed.emit(Color(0.2, 0.4, 0.6))
+	check_eq(ws.get_foreground_color(), Color(0.2, 0.4, 0.6), "which sets the foreground colour")
+	picker.get_parent().hide()
+	swatch.background_pressed.emit()
+	picker.color_changed.emit(Color(0.9, 0.8, 0.1))
+	check_eq(ws.get_background_color(), Color(0.9, 0.8, 0.1), "and the background colour from the other swatch")
+	picker.get_parent().hide()
+	ws.reset_colors()
+	canvas.grab_focus()
 
 	_key(KEY_P)
 	ws.set_tool_option("paintbrush", "size", 20.0)
@@ -254,7 +275,7 @@ func _test_tools_and_shortcuts() -> void:
 	ws.set_tool("color-picker")
 	canvas.tool_press(Vector2(350, 350))
 	canvas.tool_release()
-	check(ws.get_foreground_color().is_equal_approx(Color.RED), "colour picker sets the foreground: " + str(ws.get_foreground_color()))
+	check(_close(ws.get_foreground_color(), Color.RED), "colour picker sets the foreground: " + str(ws.get_foreground_color()))
 
 	ws.set_tool("bucket-fill")
 	ws.set_foreground_color(Color(1, 1, 0))
@@ -363,6 +384,18 @@ func _test_layers() -> void:
 	check(tree.get_root().get_first_child().get_icon(1) != null, "rows get thumbnails")
 	doc.undo()
 	check_eq(doc.layer_get_mode(doc.get_active_layer()), TetraImageDocument.LAYER_MODE_NORMAL, "layer changes are undoable")
+
+	# Double-click renames in place.
+	await _frames(2)
+	tree.item_activated.emit()
+	await _frames(2)
+	var editors := tree.find_children("*", "LineEdit", true, false)
+	if check(editors.size() > 0 and editors[0].is_visible_in_tree(), "double-click starts renaming the layer"):
+		editors[0].text = "Renamed"
+		editors[0].text_submitted.emit("Renamed")
+		await _frames(3)
+		check_eq(doc.layer_get_name(doc.get_active_layer()), "Renamed", "the new name reaches the document")
+		check(panel.get_listed_names().has("Renamed"), "and the list")
 
 
 func _test_menus() -> void:
@@ -479,7 +512,7 @@ func _test_filters() -> void:
 	var color_items := []
 	for i in colors.item_count:
 		color_items.append(colors.get_item_text(i))
-	check(color_items.has("Invert") and color_items.has("Levels..."), "the Colors menu lists the colour operations: " + str(color_items.slice(0, 6)))
+	check(color_items.has("Invert...") and color_items.has("Levels..."), "the Colors menu lists the colour operations: " + str(color_items.slice(0, 6)))
 	var filter_items := []
 	for i in filters.item_count:
 		filter_items.append(filters.get_item_text(i))
@@ -501,7 +534,9 @@ func _test_filters() -> void:
 	var steps := doc.get_undo_names().size()
 
 	# No parameters: applied at once, off the main thread.
-	var invert_index := color_items.find("Invert")
+	# GEGL's parameterless Invert shares its name with Tetra's own, so it is marked.
+	var invert_index := color_items.find("Invert (GEGL)")
+	check(invert_index >= 0 or not gegl, "an engine operation named like a native one is marked: " + str(color_items))
 	check_eq(ws.apply_operation("native:posterize", {"levels": 2}), OK, "apply_operation")
 	check_eq(doc.get_undo_names().size(), steps + 1, "apply_operation is one undo step")
 	doc.undo()
@@ -576,8 +611,12 @@ func _test_filters() -> void:
 	# Operations without parameters from the menu, through the selection.
 	doc.select_rect(Rect2i(0, 0, 256, 128))
 	var bottom := _pixel(doc, 200, 200)
-	colors.index_pressed.emit(invert_index)
-	check(await _wait_for(func() -> bool: return doc.get_undo_names().size() == steps + 4), "Colors > Invert applies at once")
+	if gegl:
+		colors.index_pressed.emit(invert_index)
+	else:
+		ws.apply_operation("native:invert")
+	check(await _wait_for(func() -> bool: return doc.get_undo_names().size() == steps + 5), "Colors > Invert applies at once")
+	check_eq(doc.get_undo_names()[-1], "Invert", "as one undo step")
 	check(_pixel(doc, 200, 200).is_equal_approx(bottom), "outside the selection nothing changed")
 	check(not _pixel(doc, 200, 50).is_equal_approx(bottom), "inside it did")
 	doc.select_none()

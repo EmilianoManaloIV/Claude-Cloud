@@ -1,4 +1,7 @@
-# Builds downloadable Tetra Studio editors for Linux and Windows.
+# Builds the self-contained Tetra Studio downloads for Linux and Windows.
+#
+# Each archive holds the editor and everything its workspaces use: GEGL, MLT,
+# melt, ffmpeg, frei0r, Kdenlive's catalogs and Blender (see scripts/package.sh).
 #
 # Runs when a tag such as v0.1.0 is pushed (the archives are attached to a
 # GitHub release of that name) or when started by hand from the Actions tab
@@ -8,57 +11,140 @@ name: Release builds
 on:
   push:
     tags: ["v*"]
+    # Temporary, while the packaging is being brought up: packaging commits on
+    # the development branch build too.
+    branches: ["claude/unified-creative-editor-r9g9yr"]
+    paths: [".github/**", "scripts/package**"]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux
-            platform: linuxbsd
-            binary: godot.linuxbsd.editor.x86_64
-            packages: >-
-              libx11-dev libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev libgl1-mesa-dev
-              libglu1-mesa-dev libasound2-dev libpulse-dev libudev-dev libwayland-dev
-              libxkbcommon-dev libdbus-1-dev libfontconfig-dev libgegl-dev libmlt++-dev
-          - name: windows
-            platform: windows
-            binary: godot.windows.editor.x86_64.exe
-            packages: mingw-w64
+  linux:
     runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install build and packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y scons pkg-config mold ${{ matrix.packages }}
-          if [ "${{ matrix.platform }}" = windows ]; then
-            sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
-            sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
-          fi
+          sudo apt-get install -y scons pkg-config mold patchelf \
+            libx11-dev libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev libgl1-mesa-dev \
+            libglu1-mesa-dev libasound2-dev libpulse-dev libudev-dev libwayland-dev \
+            libxkbcommon-dev libdbus-1-dev libfontconfig-dev \
+            libgegl-dev libmlt++-dev melt frei0r-plugins \
+            libxxf86vm1 libxfixes3 libxi6 libsm6 libxrender1 libgl1 libegl1 libxkbcommon0
 
       - name: Fetch Godot and the Kdenlive catalogs
         run: scripts/fetch-upstream.sh godot kdenlive
 
+      - uses: actions/cache@v4
+        with:
+          path: build/scons-cache
+          key: scons-linux-${{ github.sha }}
+          restore-keys: scons-linux-
+
       - name: Build
-        run: TETRA_PLATFORM=${{ matrix.platform }} scripts/build.sh compiledb=no
+        run: scripts/build.sh compiledb=no cache_path="$PWD/build/scons-cache" cache_limit=4
 
       - name: Package
-        run: scripts/package.sh ${{ matrix.name }} upstream/godot/bin/${{ matrix.binary }}
+        run: scripts/package.sh linux upstream/godot/bin/godot.linuxbsd.editor.x86_64
+
+      - name: Verify the archive is self-contained
+        run: scripts/package-verify.sh dist/tetra-studio-linux-x86_64.tar.gz
+
+      - name: Run the headless tests against the packaged editor
+        run: |
+          mkdir -p "$RUNNER_TEMP/tested"
+          tar -xzf dist/tetra-studio-linux-x86_64.tar.gz -C "$RUNNER_TEMP/tested"
+          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/home" \
+            TETRA_BIN="$RUNNER_TEMP/tested/tetra-studio-linux-x86_64/tetra-studio" \
+            scripts/test.sh >"$RUNNER_TEMP/tests.log" 2>&1 || status=$?
+          grep -E '^(ok|FAIL) |^FAILED|test files' "$RUNNER_TEMP/tests.log" | head -n 200
+          exit "${status:-0}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tetra-studio-${{ matrix.name }}
-          path: dist/*
+          name: tetra-studio-linux-x86_64
+          path: dist/tetra-studio-linux-x86_64.tar.gz
+          compression-level: 0
 
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: dist/tetra-studio-linux-x86_64.tar.gz
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Keep LF line endings
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      # UCRT64 is the MSYS2 environment that carries both GEGL and MLT.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: git zip unzip
+          pacboy: >-
+            gcc:p scons:p pkgconf:p ntldd:p
+            gegl:p mlt:p frei0r-plugins:p ffmpeg:p
+            gdk-pixbuf2:p pango:p sdl2:p libvorbis:p rubberband:p vid.stab:p
+            sox:p libsamplerate:p libebur128:p fftw:p rtaudio:p
+
+      - name: Fetch Godot and the Kdenlive catalogs
+        run: |
+          git config --global --add safe.directory '*'
+          scripts/fetch-upstream.sh godot kdenlive
+
+      - uses: actions/cache@v4
+        with:
+          path: build/scons-cache
+          key: scons-windows-${{ github.sha }}
+          restore-keys: scons-windows-
+
+      - name: Build
+        run: |
+          pkg-config --modversion gegl-0.4 mlt++-7
+          TETRA_PLATFORM=windows scripts/build.sh compiledb=no \
+            cache_path="$(cygpath -m "$PWD")/build/scons-cache" cache_limit=4
+
+      - name: Package
+        run: scripts/package.sh windows upstream/godot/bin/godot.windows.editor.x86_64.exe
+
+      # Unpacked into a fresh folder and run from cmd.exe with a bare PATH, so
+      # nothing from MSYS2 can stand in for a DLL missing from the archive.
+      - name: Verify the archive is self-contained
+        shell: cmd
+        run: |
+          mkdir "%RUNNER_TEMP%\tested" "%RUNNER_TEMP%\project"
+          tar -xf dist\tetra-studio-windows-x86_64.zip -C "%RUNNER_TEMP%\tested" || exit /b 1
+          copy scripts\package-smoke.gd "%RUNNER_TEMP%\project\" || exit /b 1
+          type nul > "%RUNNER_TEMP%\project\project.godot"
+          set "PATH=%SystemRoot%\System32;%SystemRoot%"
+          set TETRA_CONSOLE=1
+          call "%RUNNER_TEMP%\tested\tetra-studio-windows-x86_64\TetraStudio.bat" --headless --path "%RUNNER_TEMP%\project" --script res://package-smoke.gd > "%RUNNER_TEMP%\smoke.log" 2>&1
+          type "%RUNNER_TEMP%\smoke.log"
+          findstr /b /c:"SMOKE OK" "%RUNNER_TEMP%\smoke.log" > nul || exit /b 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tetra-studio-windows-x86_64
+          path: dist/tetra-studio-windows-x86_64.zip
+          compression-level: 0
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/tetra-studio-windows-x86_64.zip
