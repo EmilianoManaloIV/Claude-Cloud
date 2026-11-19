@@ -214,7 +214,7 @@ void TetraBlenderModifiersTab::_update_stack() {
 		target_label->set_tooltip_text(String());
 	}
 	const bool loading = add_menu_wanted && plugin->get_schema_state(TetraBlenderEditorPlugin::SCHEMA_MODIFIERS) == TetraBlenderEditorPlugin::SCHEMA_LOADING;
-	add_button->set_text(loading ? TTR("Starting Blender…") : TTR("Add Modifier"));
+	add_button->set_text(loading ? TTR("Starting Blender...") : TTR("Add Modifier"));
 	add_button->set_disabled(loading || !target || target->get_mesh().is_null());
 	clear_button->set_disabled(stack.is_empty());
 
@@ -286,7 +286,7 @@ void TetraBlenderModifiersTab::_update_params() {
 				params_note->set_text(TTR("The parameters are listed by Blender, which could not be started."));
 				break;
 			default:
-				params_note->set_text(TTR("Asking Blender for the parameters…"));
+				params_note->set_text(TTR("Asking Blender for the parameters..."));
 				if (is_visible_in_tree()) {
 					plugin->load_schemas(TetraBlenderEditorPlugin::SCHEMA_MODIFIERS);
 				}
@@ -361,7 +361,7 @@ void TetraBlenderModifiersTab::_update_info() {
 
 	String text;
 	if (evaluating) {
-		text = TTR("Blender is evaluating the stack…");
+		text = TTR("Blender is evaluating the stack...");
 	} else if (!error.is_empty()) {
 		text = error;
 	} else if (info.has("triangle_count")) {

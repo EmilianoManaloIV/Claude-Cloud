@@ -1,6 +1,7 @@
 78098b89c88a74ebe8c20117b8754620
-::res://::1795068146
+::res://::1795068410
 tetra_test.gd::GDScript::4018367346105619445::1794395676::0::1::::<>SceneTree<><>0<>0<><>::
+video_project.mlt::TetraVideoProjectFile::63053391457226771::1795068219::0::1::::<><><>0<>0<><>::
 ::res://tetra/::1794397756
 test_engine_registry.gd::GDScript::7368377153648747976::1794397497::0::1::::<>SceneTree<><>0<>0<><>::
 test_host.gd::GDScript::77281553525549576::1794395676::0::1::::<>SceneTree<><>0<>0<><>::
@@ -18,7 +19,9 @@ test_blender_bridge.gd::GDScript::3453981063856632804::1794398409::0::1::::<>Sce
 test_launcher.gd::GDScript::537375768760490021::1794398386::0::1::::<>SceneTree<><>0<>0<><>::
 test_mesh_exchange.gd::GDScript::2846746241580504758::1794397724::0::1::::<>SceneTree<><>0<>0<><>::
 test_scene_gather.gd::GDScript::9026451134836732914::1794399799::0::1::::<>SceneTree<><>0<>0<><>::
-::res://tetra_model/shots/::1795067904
+::res://tetra_model/shots/::1795068310
+add_modifier_menu.gd::GDScript::2113557156154460627::1795068230::0::1::::<>RefCounted<><>0<>0<><>::
+add_primitive_dialog.gd::GDScript::1522480807734407190::1795068230::0::1::::<>RefCounted<><>0<>0<><>::
 checks.gd::GDScript::5366462823278226836::1794400246::0::1::::<>RefCounted<><>0<>0<><>::
 modifiers.gd::GDScript::4310897347564607434::1794399852::0::1::::<>RefCounted<><>0<>0<><>::
 not_found.gd::GDScript::1014680930101785096::1794399972::0::1::::<>RefCounted<><>0<>0<><>::
@@ -41,6 +44,9 @@ test_playback.gd::GDScript::1566268153637718156::1794397773::0::1::::<>SceneTree
 test_project.gd::GDScript::4454548861189139952::1794397151::0::1::::<>SceneTree<><>0<>0<><>::
 test_render.gd::GDScript::3055462253752303047::1794398718::0::1::::<>SceneTree<><>0<>0<><>::
 test_xml_engine.gd::GDScript::3561995517900824570::1794397739::0::1::::<>SceneTree<><>0<>0<><>::
-::res://tetra_video/shots/::1794399197
+::res://tetra_video/shots/::1795068394
+checks.gd::GDScript::2323063332872204289::1795068394::0::1::::<>RefCounted<><>0<>0<><>::
+editing.gd::GDScript::456008741509892948::1795068194::0::1::::<>RefCounted<><>0<>0<><>::
+video_common.gd::GDScript::2483561910061777590::1795068207::0::1::::<>RefCounted<><>0<>0<><>::
 ::res://tools/::1794395685
 editor_shot.gd::GDScript::3778890648924082746::1794395676::0::1::::<>SceneTree<><>0<>0<><>::

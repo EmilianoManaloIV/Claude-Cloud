@@ -355,6 +355,94 @@ polygon, optional corner UVs and normals, and — in files Blender writes — it
 triangulation, so n-gons survive and come back triangulated the way Blender
 would draw them).
 
+## Workspace
+
+In the editor the bridge appears inside the 3D workspace (`editor/`): a
+**Blender** dock (right side, next to the Inspector) and a **Blender** menu in
+the 3D toolbar. Blender is started by the first action that needs it; nothing
+blocks the editor, and the dock's first line shows the state: not started,
+"Starting Blender...", "Blender 5.3.0 ready", "Blender 5.3.0 working...", or
+"Blender not found" with a hint naming the two settings and
+`scripts/setup-blender-bridge.sh`. Every change to the scene is one step in
+the editor's undo history. The workspace defines no keyboard shortcuts.
+
+| Where | What the user can do |
+| --- | --- |
+| Dock > **Modifiers** | For the selected MeshInstance3D: **Add Modifier** (popup grouped Edit / Generate / Deform / Normals / Physics / Other, from `list_modifiers`), the stack with an enable checkbox, move up/down and remove per entry, and the selected modifier's parameters. Blender evaluates source mesh + stack after every change (debounced; the newest request wins) and the result replaces the node's mesh. **Apply All** bakes the result and clears the stack; **Remove All** restores the original mesh. Dragging a parameter is one undo step. |
+| Dock > **Operators** | Search or browse the mesh and UV operators of `list_operators`, edit the parameters, **Run** on the selected node's mesh (whole mesh selected). Afterwards the panel stays editable and **Re-run with New Values** replaces the result by running the operator again on the mesh it started from (Blender's "Adjust Last Operation"), as long as that operation is still the newest undo step. |
+| Dock > **Render** | Cycles render of the edited scene: every visible MeshInstance3D with its StandardMaterial3D values, the Directional/Omni/Spot lights, the WorldEnvironment background, seen through the 3D viewport's camera or the scene's current Camera3D. Settings: camera, width, height, viewport aspect, samples, denoise, transparent background (advanced). Progress while rendering, Cancel, the picture in a pan/zoom view, **Save to Project...** (PNG; the file system dock is rescanned). |
+| Menu > **Add Mesh** | The primitives of `list_primitives` (Cube, UV Sphere, Ico Sphere, Cylinder, Cone, Torus, Grid, Monkey, ...). Choosing one opens its parameter dialog; OK adds a MeshInstance3D named after the primitive, with a default material, under the selected node or the scene root. |
+| Menu > **Import Model...** | Imports fbx, obj, ply, stl, usd, abc, blend and the other formats Blender reads as MeshInstance3D nodes under a new Node3D. |
+| Menu > Modifiers / Operators / Render, Join Triangles into Quads, Restart Blender | Open the dock on a tab; toggle the editor setting `tetra/blender/join_triangles` (meshes go to Blender as quads where triangles pair up); end the Blender process (the next request starts a new one). |
+
+The stack and the original mesh are stored on the node as metadata
+(`tetra_blender_modifiers`: Array of the entries `apply_modifiers` takes,
+`tetra_blender_source_mesh`: Mesh), so they are saved with the scene.
+
+Settings (Editor Settings): `tetra/blender/python_path` (a Python with the
+`bpy` module) and `tetra/blender/executable_path` (a Blender executable); the
+environment variable `TETRA_BLENDER_PYTHON` works too. See "Finding Blender".
+
+### Scripting surface
+
+The editor classes exist only inside the running editor (tool scripts, editor
+plugins, screenshot drivers), not in headless tests.
+
+```gdscript
+var blender := TetraBlenderEditorPlugin.get_singleton()
+blender.add_primitive("blender:mesh.primitive_cube_add", {"size": 1.0})
+var cube: MeshInstance3D = await blender.primitive_added
+blender.add_modifier(cube, "SUBSURF", {"levels": 2})
+await blender.modifiers_evaluated
+blender.run_operator(cube, "blender:mesh.bevel", {"offset": 0.1})
+await blender.operator_finished
+blender.render_current_view({"width": 800, "samples": 64})
+await blender.render_finished
+blender.save_render("res://render.png")
+```
+
+`TetraBlenderEditorPlugin` (EditorPlugin). All calls return at once; results
+come through the signals.
+
+| Method | |
+| --- | --- |
+| `static get_singleton() -> TetraBlenderEditorPlugin` | |
+| `get_bridge() -> TetraBlenderBridge`, `get_dock() -> TetraBlenderDock`, `show_tab(tab: String)` | `tab` is `"modifiers"`, `"operators"` or `"render"`. |
+| `get_status() -> Status`, `get_status_text()`, `get_status_hint()`, `get_last_error() -> String`, `restart_bridge()` | `Status`: `STATUS_NOT_FOUND`, `STATUS_NOT_STARTED`, `STATUS_STARTING`, `STATUS_READY`, `STATUS_WORKING`, `STATUS_FAILED`. |
+| `load_schemas(kind: SchemaKind)`, `get_schema_state(kind) -> SchemaState`, `get_schemas(kind) -> Array`, `find_schema(kind, id: String) -> Dictionary` | `SchemaKind`: `SCHEMA_MODIFIERS`, `SCHEMA_OPERATORS`, `SCHEMA_PRIMITIVES`. `SchemaState`: `SCHEMA_NOT_LOADED`, `SCHEMA_LOADING`, `SCHEMA_LOADED`, `SCHEMA_FAILED`. |
+| `static get_changed_values(schema: Dictionary, values: Dictionary) -> Dictionary` | The values that differ from the schema's defaults. |
+| `get_target() -> MeshInstance3D` | The single selected MeshInstance3D, or null. |
+| `get_modifier_stack(node) -> Array`, `get_modifier_label(modifier: Dictionary) -> String` | |
+| `add_modifier(node, type: String, values := {}) -> int` | `type` as Blender names it (`"BEVEL"`); returns the index. |
+| `set_modifier_values(node, index: int, values: Dictionary)`, `set_modifier_enabled(node, index, enabled: bool)`, `set_modifier_object(node, index, param: String, path: NodePath)`, `move_modifier(node, index, to_index)`, `remove_modifier(node, index)` | |
+| `apply_modifiers(node) -> bool`, `clear_modifiers(node)`, `evaluate_modifiers(node)`, `is_evaluating(node) -> bool`, `get_evaluation_info(node) -> Dictionary` | Info: `{evaluating, error, vertex_count, polygon_count, triangle_count}`. |
+| `run_operator(node, id: String, values := {}) -> bool`, `rerun_last_operator(values: Dictionary) -> bool`, `can_rerun_last_operator() -> bool`, `is_operator_running() -> bool`, `get_last_operation() -> Dictionary` | Last operation: `{node, id, values}`. |
+| `add_primitive(id: String, values := {}, parent: Node = null)`, `popup_add_primitive(id)`, `import_model(path: String, parent: Node = null)`, `popup_import_model()` | |
+| `get_render_schema() -> Dictionary`, `render_current_view(settings := {}) -> bool`, `cancel_render()`, `is_rendering() -> bool`, `get_last_render() -> Image`, `get_last_render_info() -> Dictionary`, `save_render(path: String) -> Error` | Settings: `camera` (`"viewport"` or `"scene"`), `width`, `height`, `match_viewport`, `samples`, `denoise`, `transparent`. Info: `{width, height, samples, render_time, denoised}`. |
+
+Signals: `status_changed()`, `schemas_changed(kind: int)`, `target_changed()`,
+`modifiers_changed(node)`, `modifiers_evaluated(node, ok: bool)`,
+`operator_started()`, `operator_finished(node, ok: bool, message: String)`,
+`primitive_added(node: MeshInstance3D)`, `model_imported(node: Node3D)`,
+`request_failed(action: String, message: String)`, `render_started()`,
+`render_progress(fraction: float, sample: int, samples: int)`,
+`render_finished(ok: bool, message: String)`.
+
+The dock's parts, for drivers: `TetraBlenderDock.show_tab(tab)`,
+`get_current_tab()`, `get_modifiers_tab()`, `get_operators_tab()`,
+`get_render_tab()`; `TetraBlenderModifiersTab.select_modifier(index)`,
+`get_selected_modifier()`, `popup_add_menu()`, `get_param_panel()`;
+`TetraBlenderOperatorsTab.select_operator(id)`, `get_selected_operator()`,
+`run()`, `get_browser()`, `get_param_panel()`;
+`TetraBlenderRenderTab.render()`, `get_param_panel()`, `get_view()`.
+
+Screenshot drivers and the UI checks live in
+`tests/godot/project/tetra_model/shots/`:
+
+```sh
+scripts/screenshot.sh build/screens/model_checks.png 3D res://tetra_model/shots/checks.gd   # prints "N checks, M failed"
+```
+
 ## Testing
 
 ```sh

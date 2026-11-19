@@ -30,7 +30,7 @@ void TetraBlenderOperatorsTab::_schemas_changed(int p_kind) {
 			_set_status(TTR("The operators are listed by Blender, which could not be started."), true);
 		} break;
 		default: {
-			_set_status(TTR("Asking Blender for its operators…"));
+			_set_status(TTR("Asking Blender for its operators..."));
 		} break;
 	}
 	_update_buttons();
@@ -94,7 +94,7 @@ void TetraBlenderOperatorsTab::_rerun_pressed() {
 }
 
 void TetraBlenderOperatorsTab::_operator_started() {
-	_set_status(TTR("Blender is working…"));
+	_set_status(TTR("Blender is working..."));
 	_update_buttons();
 }
 
@@ -220,7 +220,8 @@ TetraBlenderOperatorsTab::TetraBlenderOperatorsTab(TetraBlenderEditorPlugin *p_p
 	spacer->set_stretch_ratio(0.01);
 	lower->add_child(spacer);
 
-	HBoxContainer *buttons = memnew(HBoxContainer);
+	// Stacked, because the dock is too narrow for both labels side by side.
+	VBoxContainer *buttons = memnew(VBoxContainer);
 	lower->add_child(buttons);
 	run_button = memnew(Button);
 	run_button->set_text(TTRC("Run"));
@@ -230,8 +231,6 @@ TetraBlenderOperatorsTab::TetraBlenderOperatorsTab(TetraBlenderEditorPlugin *p_p
 	buttons->add_child(run_button);
 	rerun_button = memnew(Button);
 	rerun_button->set_text(TTRC("Re-run with New Values"));
-	rerun_button->set_h_size_flags(SIZE_EXPAND_FILL);
-	rerun_button->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS);
 	rerun_button->set_tooltip_text(TTRC("Adjust the last operation: run it again with the values above on the mesh it started from."));
 	rerun_button->connect(SceneStringName(pressed), callable_mp(this, &TetraBlenderOperatorsTab::_rerun_pressed));
 	buttons->add_child(rerun_button);

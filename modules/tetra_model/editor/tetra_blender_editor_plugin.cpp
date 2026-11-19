@@ -92,11 +92,11 @@ void TetraBlenderEditorPlugin::_update_status() {
 	if (running) {
 		const String version = bridge->get_blender_version();
 		new_status = busy ? STATUS_WORKING : STATUS_READY;
-		text = busy ? vformat(TTR("Blender %s working…"), version) : vformat(TTR("Blender %s ready"), version);
+		text = busy ? vformat(TTR("Blender %s working..."), version) : vformat(TTR("Blender %s ready"), version);
 		hint = bridge->get_launch_description();
 	} else if (busy) {
 		new_status = STATUS_STARTING;
-		text = TTR("Starting Blender…");
+		text = TTR("Starting Blender...");
 		hint = TetraBlenderBridge::find_launcher().get("description", String());
 	} else if (!start_error.is_empty()) {
 		new_status = STATUS_FAILED;
@@ -998,7 +998,7 @@ void TetraBlenderEditorPlugin::_update_primitive_menu() {
 			primitive_menu->set_item_disabled(-1, true);
 		} break;
 		default: {
-			primitive_menu->add_item(TTR("Starting Blender…"));
+			primitive_menu->add_item(TTR("Starting Blender..."));
 			primitive_menu->set_item_disabled(-1, true);
 		} break;
 	}

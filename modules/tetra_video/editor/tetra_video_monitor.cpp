@@ -566,7 +566,7 @@ TetraVideoMonitor::TetraVideoMonitor() {
 	timecode_edit = memnew(LineEdit);
 	timecode_edit->set_text("00:00:00:00");
 	timecode_edit->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
-	timecode_edit->set_custom_minimum_size(Size2(96, 0) * EDSCALE);
+	timecode_edit->set_custom_minimum_size(Size2(124, 0) * EDSCALE);
 	timecode_edit->set_select_all_on_focus(true);
 	timecode_edit->set_tooltip_text(TTR("Position (HH:MM:SS:FF). Type a timecode or a frame number and press Enter to go there."));
 	timecode_edit->connect(SceneStringName(text_submitted), callable_mp(this, &TetraVideoMonitor::_timecode_submitted));

@@ -81,7 +81,7 @@ void TetraBlenderRenderTab::_save_file_selected(const String &p_path) {
 
 void TetraBlenderRenderTab::_render_started() {
 	progress_bar->set_value(0.0);
-	_set_status(TTR("Sending the scene to Blender…"));
+	_set_status(TTR("Sending the scene to Blender..."));
 	_update_buttons();
 }
 
@@ -94,7 +94,7 @@ void TetraBlenderRenderTab::_render_finished(bool p_ok, const String &p_message)
 	if (p_ok) {
 		view->set_image(plugin->get_last_render());
 		const Dictionary info = plugin->get_last_render_info();
-		_set_status(vformat(TTR("%d × %d, %d samples%s, %s s"), int(info.get("width", 0)), int(info.get("height", 0)), int(info.get("samples", 0)), bool(info.get("denoised", false)) ? TTR(", denoised") : String(), String::num(double(info.get("render_time", 0.0)), 1)));
+		_set_status(vformat(TTR("%d x %d, %d samples%s, %s s"), int(info.get("width", 0)), int(info.get("height", 0)), int(info.get("samples", 0)), bool(info.get("denoised", false)) ? TTR(", denoised") : String(), String::num(double(info.get("render_time", 0.0)), 1)));
 	} else {
 		_set_status(p_message.is_empty() ? TTR("The render failed.") : p_message, true);
 	}

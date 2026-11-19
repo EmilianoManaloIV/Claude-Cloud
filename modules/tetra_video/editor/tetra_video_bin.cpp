@@ -65,7 +65,8 @@ void TetraVideoBin::_update_list() {
 		const PackedInt32Array ids = project->get_bin_clip_ids();
 		for (int i = 0; i < ids.size(); i++) {
 			const Dictionary bin = project->get_bin_clip(ids[i]);
-			const int item = list->add_item(String(bin["name"]) + "\n" + TetraVideoTimecode::from_frames(bin["length"], fps));
+			// The duration comes first so that a long name cannot push it out of a narrow bin.
+			const int item = list->add_item(TetraVideoTimecode::from_frames(bin["length"], fps) + "   " + String(bin["name"]));
 			list->set_item_metadata(item, ids[i]);
 			const int used = project->get_bin_clip_use_count(ids[i]);
 			String tooltip = String(bin["source"]) + "\n" + vformat(TTR("%d frames"), int(bin["length"]));
