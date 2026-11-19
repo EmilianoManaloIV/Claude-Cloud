@@ -14,8 +14,11 @@ env_tetra_video = env_modules.Clone()
 if os.system("pkg-config --exists mlt++-7") == 0:
     cflags = env.ParseFlags("!pkg-config mlt++-7 --cflags")
     # -isystem keeps MLT's own headers out of -Wshadow and friends.
+    # The toolchain's own include directory (MSYS2's pkg-config lists it) must
+    # keep its place in the search order, or <cmath> cannot find <math.h>.
     for path in cflags["CPPPATH"]:
-        env_tetra_video.Append(CCFLAGS=["-isystem", path])
+        if not os.path.exists(os.path.join(str(path), "stdlib.h")):
+            env_tetra_video.Append(CCFLAGS=["-isystem", path])
     env_tetra_video.Append(CPPDEFINES=cflags["CPPDEFINES"] + ["TETRA_MLT_ENABLED"])
 
     link = env.ParseFlags("!pkg-config mlt++-7 --libs")

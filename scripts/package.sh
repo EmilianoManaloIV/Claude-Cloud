@@ -15,6 +15,7 @@
 #   TETRA_SKIP_BLENDER=1       leave Blender out (the bridge then needs one installed)
 #   TETRA_BLENDER_ARCHIVE=file use this Blender portable archive instead of downloading
 #   TETRA_BLENDER_VERSION      Blender release to bundle (default 5.3.0)
+#   TETRA_BLENDER_SHA256=hex   refuse a downloaded Blender archive with another checksum
 #   TETRA_MLT_SKIP="a b"       MLT modules left out (default: the Qt, OpenCV and GPU ones)
 #   TETRA_KEEP_STAGE=1         keep the unpacked tree in dist/ next to the archive
 set -euo pipefail
@@ -67,6 +68,14 @@ fetch_blender() {
 			log "downloading $base/$file"
 			if curl -fL --retry 3 --retry-delay 5 -sS -o "$cache/$file.part" "$base/$file"; then
 				mv "$cache/$file.part" "$cache/$file"
+				local sum
+				sum="$(sha256sum "$cache/$file" | cut -d' ' -f1)"
+				log "sha256 $sum  $file"
+				if [ -n "${TETRA_BLENDER_SHA256:-}" ] && [ "$sum" != "$TETRA_BLENDER_SHA256" ]; then
+					log "checksum mismatch (expected $TETRA_BLENDER_SHA256): not using this download"
+					rm -f "$cache/$file"
+					continue
+				fi
 				ok=1
 				break
 			fi

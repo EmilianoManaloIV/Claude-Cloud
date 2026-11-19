@@ -39,7 +39,7 @@ jobs:
             libx11-dev libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev libgl1-mesa-dev \
             libglu1-mesa-dev libasound2-dev libpulse-dev libudev-dev libwayland-dev \
             libxkbcommon-dev libdbus-1-dev libfontconfig-dev \
-            libgegl-dev libmlt++-dev melt frei0r-plugins \
+            libgegl-dev libmlt-dev libmlt++-dev melt frei0r-plugins \
             libxxf86vm1 libxfixes3 libxi6 libsm6 libxrender1 libgl1 libegl1 libxkbcommon0
 
       - name: Fetch Godot and the Kdenlive catalogs
@@ -53,6 +53,8 @@ jobs:
 
       - name: Build
         run: |
+          # Without these the build would quietly leave GEGL or MLT out.
+          pkg-config --exists --print-errors gegl-0.4 mlt++-7
           mkdir -p build
           scripts/build.sh compiledb=no cache_path="$PWD/build/scons-cache" cache_limit=4
 

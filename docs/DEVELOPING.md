@@ -7,10 +7,11 @@ sudo apt-get install build-essential scons pkg-config mold python3 \
     libx11-dev libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev libgl1-mesa-dev \
     libglu1-mesa-dev libasound2-dev libpulse-dev libudev-dev libwayland-dev \
     libxkbcommon-dev libdbus-1-dev libfontconfig-dev \
-    libgegl-dev libmlt++-dev melt frei0r-plugins ffmpeg
+    libgegl-dev libmlt-dev libmlt++-dev melt frei0r-plugins ffmpeg
 ```
 
-`libgegl-dev` and `libmlt++-dev` are optional. Without them the GEGL filter
+`libgegl-dev` and `libmlt-dev`/`libmlt++-dev` are optional (MLT needs both:
+`libmlt++-dev` does not pull in `libmlt-dev`). Without them the GEGL filter
 bridge and the MLT video engine are left out of the build and everything else
 still works.
 
