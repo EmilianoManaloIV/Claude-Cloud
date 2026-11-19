@@ -1,5 +1,5 @@
 78098b89c88a74ebe8c20117b8754620
-::res://::1795068410
+::res://::1795068483
 tetra_test.gd::GDScript::4018367346105619445::1794395676::0::1::::<>SceneTree<><>0<>0<><>::
 video_project.mlt::TetraVideoProjectFile::63053391457226771::1795068219::0::1::::<><><>0<>0<><>::
 ::res://tetra/::1794397756
@@ -44,8 +44,9 @@ test_playback.gd::GDScript::1566268153637718156::1794397773::0::1::::<>SceneTree
 test_project.gd::GDScript::4454548861189139952::1794397151::0::1::::<>SceneTree<><>0<>0<><>::
 test_render.gd::GDScript::3055462253752303047::1794398718::0::1::::<>SceneTree<><>0<>0<><>::
 test_xml_engine.gd::GDScript::3561995517900824570::1794397739::0::1::::<>SceneTree<><>0<>0<><>::
-::res://tetra_video/shots/::1795068394
+::res://tetra_video/shots/::1795068480
 checks.gd::GDScript::2323063332872204289::1795068394::0::1::::<>RefCounted<><>0<>0<><>::
+dbg.gd::GDScript::1506841336932165337::1795068480::0::1::::<>RefCounted<><>0<>0<><>::
 editing.gd::GDScript::456008741509892948::1795068194::0::1::::<>RefCounted<><>0<>0<><>::
 video_common.gd::GDScript::2483561910061777590::1795068207::0::1::::<>RefCounted<><>0<>0<><>::
 ::res://tools/::1794395685
