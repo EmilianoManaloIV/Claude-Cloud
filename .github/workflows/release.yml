@@ -55,21 +55,21 @@ jobs:
       - name: Verify the archive is self-contained
         run: scripts/package-verify.sh dist/tetra-studio-linux-x86_64.tar.gz
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tetra-studio-linux-x86_64
+          path: dist/tetra-studio-linux-x86_64.tar.gz
+          compression-level: 0
+
       - name: Run the headless tests against the packaged editor
         run: |
-          mkdir -p "$RUNNER_TEMP/tested"
+          mkdir -p "$RUNNER_TEMP/tested" "$RUNNER_TEMP/home"
           tar -xzf dist/tetra-studio-linux-x86_64.tar.gz -C "$RUNNER_TEMP/tested"
           env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/home" \
             TETRA_BIN="$RUNNER_TEMP/tested/tetra-studio-linux-x86_64/tetra-studio" \
             scripts/test.sh >"$RUNNER_TEMP/tests.log" 2>&1 || status=$?
           grep -E '^(ok|FAIL) |^FAILED|test files' "$RUNNER_TEMP/tests.log" | head -n 200
           exit "${status:-0}"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tetra-studio-linux-x86_64
-          path: dist/tetra-studio-linux-x86_64.tar.gz
-          compression-level: 0
 
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/')
@@ -99,7 +99,7 @@ jobs:
           pacboy: >-
             gcc:p scons:p pkgconf:p ntldd:p
             gegl:p mlt:p frei0r-plugins:p ffmpeg:p
-            gdk-pixbuf2:p pango:p sdl2:p libvorbis:p rubberband:p vid.stab:p
+            gdk-pixbuf2:p pango:p libvorbis:p rubberband:p vid.stab:p
             sox:p libsamplerate:p libebur128:p fftw:p rtaudio:p
 
       - name: Fetch Godot and the Kdenlive catalogs

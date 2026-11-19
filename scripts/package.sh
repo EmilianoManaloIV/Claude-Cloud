@@ -150,6 +150,9 @@ package_linux() {
 	# index holds absolute paths, so the launcher rebuilds it on each start.
 	pixbuf_dir="$(pkg-config --variable=gdk_pixbuf_binarydir gdk-pixbuf-2.0 2>/dev/null || true)"
 	local query="$libdir/gdk-pixbuf-2.0/gdk-pixbuf-query-loaders"
+	if [ ! -d "$pixbuf_dir/loaders" ]; then
+		pixbuf_dir="$(dirname "$(ls -d "$libdir"/gdk-pixbuf-2.0/*/loaders 2>/dev/null | head -n 1)")"
+	fi
 	if [ -d "$pixbuf_dir/loaders" ] && [ -x "$query" ]; then
 		mkdir -p "$STAGE/lib/gdk-pixbuf"
 		cp -rL "$pixbuf_dir/loaders" "$STAGE/lib/gdk-pixbuf/"
