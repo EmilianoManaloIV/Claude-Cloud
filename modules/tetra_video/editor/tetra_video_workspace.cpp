@@ -677,6 +677,18 @@ bool TetraVideoWorkspace::is_modified() const {
 	return project->get_revision() != saved_revision;
 }
 
+void TetraVideoWorkspace::request_open_project(const String &p_path) {
+	_ask_discard(PENDING_OPEN, p_path);
+}
+
+int TetraVideoWorkspace::import_and_show(const String &p_path) {
+	const int id = import_file(p_path);
+	if (id >= 0) {
+		monitor->show_clip(id);
+	}
+	return id;
+}
+
 int TetraVideoWorkspace::import_file(const String &p_path) {
 	String path = p_path;
 	const String local = ProjectSettings::get_singleton()->localize_path(p_path);

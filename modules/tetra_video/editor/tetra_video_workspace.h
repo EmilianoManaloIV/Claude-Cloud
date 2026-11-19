@@ -217,6 +217,10 @@ public:
 	Error save_project(const String &p_path = String());
 	String get_project_path() const;
 	bool is_modified() const;
+	// Opens a project file as the menu does: asks first when the open project has unsaved changes.
+	void request_open_project(const String &p_path);
+	// Adds a media file to the bin, selects it there and previews it in the monitor. Returns its bin id or -1.
+	int import_and_show(const String &p_path);
 
 	// Adds a media file to the bin (or finds it there) and returns its bin id, -1 when it cannot be read.
 	int import_file(const String &p_path);

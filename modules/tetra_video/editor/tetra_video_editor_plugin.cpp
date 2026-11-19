@@ -6,6 +6,7 @@
 
 #include "core/io/config_file.h"
 #include "core/io/file_access.h"
+#include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "core/os/keyboard.h"
 #include "editor/editor_main_screen.h"
@@ -25,9 +26,9 @@ static String _video_file_of(Object *p_object) {
 	String path;
 	if (Object::cast_to<TetraVideoProjectFile>(p_object) || Object::cast_to<TetraVideoMediaFile>(p_object)) {
 		path = resource->get_path();
-	} else if (const VideoStream *stream = Object::cast_to<VideoStream>(p_object)) {
+	} else if (Object::cast_to<VideoStream>(p_object)) {
 		// A stream of the project (Ogg Theora): the file it was loaded from.
-		path = resource->get_path().is_resource_file() ? resource->get_path() : stream->get_file();
+		path = resource->get_path();
 	}
 	return path.is_resource_file() || path.is_absolute_path() ? path : String();
 }
